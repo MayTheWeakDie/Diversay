@@ -170,12 +170,15 @@ def update_store_inventory(
         )
         db.add(inv)
     else:
-        if inventory_update.product_name:
-            product.name = inventory_update.product_name.strip()
         if inventory_update.stock is not None:
             inv.stock = inventory_update.stock
         if inventory_update.reorder_level is not None:
             inv.reorder_level = inventory_update.reorder_level
+
+    if inventory_update.product_name:
+        product.name = inventory_update.product_name.strip()
+    if inventory_update.product_brand:
+        product.brand = inventory_update.product_brand.strip().upper()
         
     db.commit()
     db.refresh(inv)

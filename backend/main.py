@@ -74,8 +74,7 @@ def seed_products():
         
         for name in products_list:
             existing = db.query(Product).filter(
-                Product.name.ilike(name),
-                Product.is_deleted == False
+                Product.name.ilike(name)
             ).first()
             if not existing:
                 logger.info(f"Seeding product: {name}")
@@ -83,6 +82,7 @@ def seed_products():
                     name=name,
                     category=ProductCategory.OTHER,
                     default_unit=UnitType.PIECES,
+                    brand="DSLP" if "divermectin" in name.lower() else "DSL",
                     unit_price=0.0
                 )
                 db.add(new_product)

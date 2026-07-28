@@ -172,6 +172,7 @@ export default function StoreDetailPage() {
   
   const [adjustItem, setAdjustItem] = useState(null)
   const [adjustProductName, setAdjustProductName] = useState('')
+  const [adjustProductBrand, setAdjustProductBrand] = useState('DSL')
   const [adjustValue, setAdjustValue] = useState('')
   const [adjustReorderLevel, setAdjustReorderLevel] = useState('')
   const [updating, setUpdating] = useState(false)
@@ -185,6 +186,7 @@ export default function StoreDetailPage() {
   const [newProdName, setNewProdName] = useState('')
   const [newProdCategory, setNewProdCategory] = useState('Other')
   const [newProdUnit, setNewProdUnit] = useState('Pieces')
+  const [newProdBrand, setNewProdBrand] = useState('DSL')
   const [initialStock, setInitialStock] = useState('0')
   const [modalLoading, setModalLoading] = useState(false)
   const [modalError, setModalError] = useState('')
@@ -460,6 +462,7 @@ export default function StoreDetailPage() {
   const handleOpenAdjust = (item) => {
     setAdjustItem(item)
     setAdjustProductName(item.product_name || '')
+    setAdjustProductBrand(item.product_brand || 'DSL')
     setAdjustValue(item.stock.toString())
     setAdjustReorderLevel((item.reorder_level ?? 15.0).toString())
     setError('')
@@ -490,7 +493,7 @@ export default function StoreDetailPage() {
     // Instant local UI update
     setInventory(prev => prev.map(item => 
       item.product_id === currentItem.product_id 
-        ? { ...item, product_name: newName, stock: val, reorder_level: reorderVal } 
+        ? { ...item, product_name: newName, product_brand: adjustProductBrand, stock: val, reorder_level: reorderVal } 
         : item
     ))
 
@@ -503,7 +506,8 @@ export default function StoreDetailPage() {
       await api.put(`/stores/${id}/inventory/${currentItem.product_id}`, { 
         stock: val,
         reorder_level: reorderVal,
-        product_name: newName
+        product_name: newName,
+        product_brand: adjustProductBrand
       })
 
       invalidateCache('/products')
@@ -605,7 +609,8 @@ export default function StoreDetailPage() {
         const prodRes = await api.post('/products', {
           name: newProdName.trim(),
           category: newProdCategory,
-          default_unit: newProdUnit
+          default_unit: newProdUnit,
+          brand: newProdBrand
         })
         productId = prodRes.data.id
         productName = prodRes.data.name
@@ -639,6 +644,7 @@ export default function StoreDetailPage() {
           product_name: productName,
           product_category: productCategory,
           default_unit: productUnit,
+          product_brand: invRes.data.product_brand || (addMode === 'new' ? newProdBrand : (globalProducts.find(p => p.id === parseInt(productId))?.brand || 'DSL')),
           stock: stockVal,
           unit_price: 0.0
         }
@@ -1451,6 +1457,20 @@ export default function StoreDetailPage() {
 
               <div>
                 <label className="block text-[11px] uppercase tracking-wider text-zinc-400 font-bold mb-1.5">
+                  Product Brand (DSL vs DSLP)
+                </label>
+                <select
+                  value={adjustProductBrand}
+                  onChange={(e) => setAdjustProductBrand(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700 focus:border-emerald-500 text-white rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none cursor-pointer"
+                >
+                  <option value="DSL">DSL (DSL Nigeria)</option>
+                  <option value="DSLP">DSLP (DSL Pharma)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] uppercase tracking-wider text-zinc-400 font-bold mb-1.5">
                   Current Stock Level ({adjustItem.default_unit}s)
                 </label>
                 <input
@@ -1621,6 +1641,20 @@ export default function StoreDetailPage() {
                           <option value="Carton">Carton</option>
                         </select>
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wider text-zinc-550 font-bold mb-1.5">
+                        Product Brand (DSL vs DSLP)
+                      </label>
+                      <select
+                        value={newProdBrand}
+                        onChange={(e) => setNewProdBrand(e.target.value)}
+                        className="w-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700 focus:border-emerald-500 text-white rounded-xl px-3 py-2.5 text-xs font-bold transition-colors focus:outline-none cursor-pointer"
+                      >
+                        <option value="DSL">DSL (DSL Nigeria)</option>
+                        <option value="DSLP">DSLP (DSL Pharma)</option>
+                      </select>
                     </div>
                   </>
                 )}

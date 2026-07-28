@@ -341,6 +341,7 @@ class StoreInventoryUpdate(BaseModel):
     stock: Optional[float] = None
     reorder_level: Optional[float] = None
     product_name: Optional[str] = None
+    product_brand: Optional[str] = None
 
 
 class AcknowledgeRequest(BaseModel):
