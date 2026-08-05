@@ -24,12 +24,18 @@ def get_dashboard_metrics(
     week_start_local = today_start_local - timedelta(days=today_start_local.weekday())
     thirty_days_ago_local = today_start_local - timedelta(days=30)
     
-    all_orders = db.query(Order).filter(Order.is_deleted == False).options(
+    all_orders_raw = db.query(Order).filter(Order.is_deleted == False).options(
         joinedload(Order.customer),
         joinedload(Order.source_store),
         joinedload(Order.destination_store),
         joinedload(Order.line_items).joinedload(OrderLineItem.product)
     ).all()
+    
+    # Exclude inter-store transfers so dashboard counts and analytics reflect only real customer orders
+    all_orders = [
+        o for o in all_orders_raw 
+        if o.destination_store_id is None and (not o.customer or ("transfer" not in o.customer.name.lower() and o.customer.name != "Inter-Store Transfer"))
+    ]
     
     for order in all_orders:
         order.order_status = calculate_order_status(order)

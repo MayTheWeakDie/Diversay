@@ -104,6 +104,72 @@ const CustomTooltip = ({ active, payload }) => {
   return null;
 };
 
+const RollingPieChart = ({ data, centerText, centerSubtext, colorsMap, isRegion }) => {
+  const [rotation, setRotation] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
+
+  useEffect(() => {
+    let frameId;
+    let lastTime = performance.now();
+    
+    const animate = (time) => {
+      const delta = time - lastTime;
+      if (!isHovered) {
+        setRotation(prev => (prev - (delta * 0.0144)) % 360);
+      }
+      lastTime = time;
+      frameId = requestAnimationFrame(animate);
+    };
+    
+    frameId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frameId);
+  }, [isHovered]);
+
+  return (
+    <div 
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className={`w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 flex items-center justify-center relative cursor-pointer group ${isRegion ? 'h-[260px]' : 'h-[280px]'}`}
+    >
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-0">
+        <p className={`font-black text-white tracking-tight drop-shadow-md ${isRegion ? 'text-xl' : 'text-2xl'}`}>
+          {centerText}
+        </p>
+        <p className={`font-extrabold uppercase tracking-widest text-emerald-400 drop-shadow-sm mt-0.5 ${isRegion ? 'text-[9px]' : 'text-[10px]'}`}>
+          {centerSubtext}
+        </p>
+      </div>
+
+      <div className="w-full h-full relative z-10">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="50%"
+              innerRadius={isRegion ? 60 : 65}
+              outerRadius={isRegion ? 90 : 95}
+              paddingAngle={4}
+              cornerRadius={5}
+              dataKey="value"
+              startAngle={90 + rotation}
+              endAngle={-270 + rotation}
+              isAnimationActive={false}
+              stroke="#09090b"
+              strokeWidth={3}
+            >
+              {data.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={colorsMap ? (colorsMap[entry.name] || PIE_COLORS[index % PIE_COLORS.length]) : PIE_COLORS[index % PIE_COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip content={<CustomTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+};
+
 const StoreTrendingPage = () => {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -121,9 +187,6 @@ const StoreTrendingPage = () => {
   const [modalTab, setModalTab] = useState('customers') // 'customers' or 'regions'
   const [selectedRegion, setSelectedRegion] = useState('all')
   const [customerDetailsModal, setCustomerDetailsModal] = useState(null)
-
-  // PieChart hover pause state for CSS spin animation
-  const [isPieHovered, setIsPieHovered] = useState(false)
   
   const initialTimeframe = searchParams.get('timeframe') || 'all'
   const [timeframe, setTimeframe] = useState(initialTimeframe)
@@ -463,52 +526,16 @@ const StoreTrendingPage = () => {
                 /* Tab 1: Customer Share Pie Chart & Table */
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
                   {/* Pie Chart */}
-                  <div 
-                    onMouseEnter={() => setIsPieHovered(true)}
-                    onMouseLeave={() => setIsPieHovered(false)}
-                    className="h-[280px] w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 flex items-center justify-center relative cursor-pointer group"
-                  >
-                    {/* Center Vital Stats Display */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
-                      <p className="text-2xl font-black text-white tracking-tight drop-shadow-md">
-                        {((selectedProduct.customers[0]?.quantity / selectedProduct.total_quantity) * 100).toFixed(1)}%
-                      </p>
-                      <p className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400 drop-shadow-sm mt-0.5">
-                        TOP BUYER SHARE
-                      </p>
-                    </div>
-
-                    <div 
-                      className="w-full h-full"
-                      style={{
-                        animation: 'spin 25s linear infinite',
-                        animationPlayState: isPieHovered ? 'paused' : 'running'
-                      }}
-                    >
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={selectedProduct.customers.map(c => ({
-                              name: c.name,
-                              value: c.quantity,
-                              percentage: ((c.quantity / selectedProduct.total_quantity) * 100).toFixed(1)
-                            }))}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={65}
-                            outerRadius={95}
-                            paddingAngle={3}
-                            dataKey="value"
-                          >
-                            {selectedProduct.customers.map((c, index) => (
-                              <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip content={<CustomTooltip />} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
+                  <RollingPieChart 
+                    data={selectedProduct.customers.map(c => ({
+                      name: c.name,
+                      value: c.quantity,
+                      percentage: ((c.quantity / selectedProduct.total_quantity) * 100).toFixed(1)
+                    }))}
+                    centerText={`${((selectedProduct.customers[0]?.quantity / selectedProduct.total_quantity) * 100).toFixed(1)}%`}
+                    centerSubtext="TOP BUYER SHARE"
+                    isRegion={false}
+                  />
 
                   {/* Customer List */}
                   <div className="space-y-3">
@@ -571,52 +598,17 @@ const StoreTrendingPage = () => {
                   {/* Region Summary Pie Chart & Cards */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
                     {/* Region Pie Chart */}
-                    <div 
-                      onMouseEnter={() => setIsPieHovered(true)}
-                      onMouseLeave={() => setIsPieHovered(false)}
-                      className="h-[260px] w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 flex items-center justify-center relative cursor-pointer group"
-                    >
-                      {/* Center Vital Stats Display */}
-                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
-                        <p className="text-xl font-black text-white tracking-tight drop-shadow-md">
-                          {regionBreakdown.list[0] ? `${((regionBreakdown.list[0].quantity / selectedProduct.total_quantity) * 100).toFixed(1)}%` : '100%'}
-                        </p>
-                        <p className="text-[9px] font-extrabold uppercase tracking-widest text-emerald-400 drop-shadow-sm mt-0.5">
-                          {regionBreakdown.list[0]?.name || 'TOP REGION'}
-                        </p>
-                      </div>
-
-                      <div 
-                        className="w-full h-full"
-                        style={{
-                          animation: 'spin 25s linear infinite',
-                          animationPlayState: isPieHovered ? 'paused' : 'running'
-                        }}
-                      >
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={regionBreakdown.list.map(r => ({
-                                name: r.name,
-                                value: r.quantity,
-                                percentage: ((r.quantity / selectedProduct.total_quantity) * 100).toFixed(1)
-                              }))}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={60}
-                              outerRadius={90}
-                              paddingAngle={4}
-                              dataKey="value"
-                            >
-                              {regionBreakdown.list.map((r, index) => (
-                                <Cell key={`r-cell-${index}`} fill={REGION_COLOR_MAP[r.name] || PIE_COLORS[index % PIE_COLORS.length]} />
-                              ))}
-                            </Pie>
-                            <Tooltip content={<CustomTooltip />} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
+                    <RollingPieChart 
+                      data={regionBreakdown.list.map(r => ({
+                        name: r.name,
+                        value: r.quantity,
+                        percentage: ((r.quantity / selectedProduct.total_quantity) * 100).toFixed(1)
+                      }))}
+                      centerText={regionBreakdown.list[0] ? `${((regionBreakdown.list[0].quantity / selectedProduct.total_quantity) * 100).toFixed(1)}%` : '100%'}
+                      centerSubtext={regionBreakdown.list[0]?.name || 'TOP REGION'}
+                      colorsMap={REGION_COLOR_MAP}
+                      isRegion={true}
+                    />
 
                     {/* Region Cards Grid */}
                     <div className="space-y-3">

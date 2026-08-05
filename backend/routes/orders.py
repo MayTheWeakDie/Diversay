@@ -417,6 +417,12 @@ def list_orders(
     """List orders with advanced filtering."""
     query = db.query(Order).filter(Order.is_deleted == False)
     
+    # Exclude inter-store transfers from main Orders Page listing
+    query = query.filter(Order.destination_store_id == None)
+    transfer_cust_ids = [c[0] for c in db.query(Customer.id).filter(Customer.name.ilike("%Inter-Store Transfer%")).all()]
+    if transfer_cust_ids:
+        query = query.filter(~Order.customer_id.in_(transfer_cust_ids))
+    
     # 1. State / City / Customer Name filtering via customer ID pre-fetching
     if state or city or customer_name:
         customer_query = db.query(Customer.id).filter(Customer.is_deleted == False)
@@ -1007,11 +1013,16 @@ def group_orders_by_field(
             detail=f"Invalid field. Must be one of: {', '.join(valid_fields)}"
         )
     
-    query = db.query(Order).filter(Order.is_deleted == False).options(
+    query_raw = db.query(Order).filter(Order.is_deleted == False).options(
         joinedload(Order.customer),
         joinedload(Order.created_by_user),
         joinedload(Order.line_items).joinedload(OrderLineItem.product)
     ).all()
+    
+    query = [
+        o for o in query_raw 
+        if o.destination_store_id is None and (not o.customer or ("transfer" not in o.customer.name.lower() and o.customer.name != "Inter-Store Transfer"))
+    ]
     
     for order in query:
         update_order_status(order)
