@@ -795,10 +795,13 @@ export default function CreateOrderModal({ isOpen, onClose }) {
         for (let j = 0; j < wb.lineItems.length; j++) {
           const item = wb.lineItems[j]
           const stock = getAvailableStock(order, item.product_id)
-          if (stock !== null && parseFloat(item.quantity || 0) > stock) {
-            const prodName = products.find(p => p.id === parseInt(item.product_id))?.name || 'product'
+          const prodName = products.find(p => p.id === parseInt(item.product_id))?.name || 'product'
+          const factor = (item.unit === 'Cartons' && prodName) ? getConversionFactor(prodName) : 1
+          const quantityInPcs = parseFloat(item.quantity || 0) * factor
+          
+          if (stock !== null && quantityInPcs > stock) {
             const storeName = stores.find(s => s.id.toString() === getDepartureStoreId(order))?.name || 'selected store'
-            setError(`Requested quantity for "${prodName}" (${item.quantity}) exceeds available stock in ${storeName} (${stock} remaining).`)
+            setError(`Requested quantity for "${prodName}" (${item.quantity} ${item.unit}) exceeds available stock in ${storeName} (${stock} pieces remaining).`)
             return
           }
         }

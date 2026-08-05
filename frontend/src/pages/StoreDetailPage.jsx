@@ -338,6 +338,17 @@ export default function StoreDetailPage() {
   const [movementRange, setMovementRange] = useState('7')
   const [movementLoading, setMovementLoading] = useState(false)
 
+  // Trending products range selector
+  const [trendingRange, setTrendingRange] = useState('all')
+
+  const TRENDING_RANGES = [
+    { value: '1', label: 'Today' },
+    { value: '7', label: 'This Week' },
+    { value: '30', label: 'Last 30 Days' },
+    { value: '90', label: 'Last 3 Months' },
+    { value: 'all', label: 'All-Time' }
+  ]
+
   const MOVEMENT_RANGES = [
     { value: '1', label: 'Today' },
     { value: '7', label: 'This Week' },
@@ -876,36 +887,71 @@ export default function StoreDetailPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Top Trending Products Bar Chart */}
               <div className="bg-zinc-900 border border-zinc-800/80 rounded-2xl p-6 shadow-xl flex flex-col min-h-[350px]">
-                <div className="flex items-center gap-2 mb-6">
-                  <BarChart3 size={16} className="text-emerald-400" />
-                  <h3 className="text-xs font-bold text-white uppercase tracking-wider">Top 5 Trending Products</h3>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 size={16} className="text-emerald-400" />
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider">Top 5 Trending Products</h3>
+                  </div>
+                  <div className="flex bg-zinc-950 p-1 border border-zinc-800 rounded-xl overflow-x-auto">
+                    {TRENDING_RANGES.map(range => (
+                      <button
+                        key={range.value}
+                        onClick={() => setTrendingRange(range.value)}
+                        className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all duration-200 whitespace-nowrap ${
+                          trendingRange === range.value
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
+                            : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+                        }`}
+                      >
+                        {range.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="flex-1 w-full h-[250px]">
-                  {analytics.top_products && analytics.top_products.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={analytics.top_products} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                        <XAxis dataKey="name" stroke="#71717a" fontSize={9} tickLine={false} />
-                        <YAxis stroke="#71717a" fontSize={9} tickLine={false} />
-                        <Tooltip
-                          cursor={false}
-                          contentStyle={{ backgroundColor: '#09090b', borderColor: '#27272a', borderRadius: '8px' }}
-                          labelStyle={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}
-                          itemStyle={{ color: '#ffffff', fontSize: '11px' }}
-                        />
-                        <Bar 
-                          dataKey="quantity" 
-                          fill="#ffffff" 
-                          activeBar={{ fill: '#d4d4d8' }}
-                          radius={[4, 4, 0, 0]} 
-                          barSize={32} 
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-zinc-550 text-xs font-medium">
-                      No transaction history to compute trends.
-                    </div>
-                  )}
+                <div 
+                  className="flex-1 w-full h-[250px] cursor-pointer group relative"
+                  onClick={() => navigate(`/store/${store.id}/trending?timeframe=${trendingRange}`)}
+                  title="Click to view detailed customer breakdown"
+                >
+                  <div className="absolute inset-0 bg-zinc-800/0 group-hover:bg-zinc-800/10 transition-colors duration-300 rounded-xl z-10 pointer-events-none flex items-center justify-center opacity-0 group-hover:opacity-100">
+                    <span className="bg-black/80 text-white text-[10px] font-bold px-3 py-1.5 rounded-full shadow-lg backdrop-blur-sm pointer-events-none transform translate-y-2 group-hover:translate-y-0 transition-all duration-300">
+                      View Customer Breakdown
+                    </span>
+                  </div>
+                  {(() => {
+                    const currentTopProducts = (analytics?.top_products_by_range && analytics.top_products_by_range[trendingRange])
+                      || (trendingRange === 'all' ? (analytics?.top_products || []) : [])
+
+                    if (currentTopProducts && currentTopProducts.length > 0) {
+                      return (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={currentTopProducts} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                            <XAxis dataKey="name" stroke="#71717a" fontSize={9} tickLine={false} />
+                            <YAxis stroke="#71717a" fontSize={9} tickLine={false} />
+                            <Tooltip
+                              cursor={false}
+                              contentStyle={{ backgroundColor: '#09090b', borderColor: '#27272a', borderRadius: '8px' }}
+                              labelStyle={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}
+                              itemStyle={{ color: '#ffffff', fontSize: '11px' }}
+                            />
+                            <Bar 
+                              dataKey="quantity" 
+                              fill="#ffffff" 
+                              activeBar={{ fill: '#d4d4d8' }}
+                              radius={[4, 4, 0, 0]} 
+                              barSize={32} 
+                            />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      )
+                    }
+
+                    return (
+                      <div className="h-full flex items-center justify-center text-zinc-550 text-xs font-medium">
+                        No product transactions logged for this timeframe.
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
 

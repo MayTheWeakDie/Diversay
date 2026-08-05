@@ -312,7 +312,13 @@ def create_order(
                     db.add(src_inv)
                 
                 factor = get_conversion_factor(product.name) if (product and item.unit == UnitType.CARTON) else 1.0
-                src_inv.stock -= item.quantity * factor
+                deduction_amount = item.quantity * factor
+                if src_inv.stock < deduction_amount:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Insufficient stock for '{product.name}' in source store. Requested {deduction_amount} pieces, but only {src_inv.stock} available."
+                    )
+                src_inv.stock -= deduction_amount
                 
             # Crediting/debiting stock to destination store
             if order_create.destination_store_id:

@@ -14,6 +14,7 @@ import ManageCustomersPage from './pages/ManageCustomersPage'
 import CustomerDetailPage from './pages/CustomerDetailPage'
 import StorePage from './pages/StorePage'
 import StoreDetailPage from './pages/StoreDetailPage'
+import StoreTrendingPage from './pages/StoreTrendingPage'
 import SplashPage from './pages/SplashPage'
 import RequestAccessPage from './pages/RequestAccessPage'
 import WeeklyCustomersPage from './pages/WeeklyCustomersPage'
@@ -39,6 +40,7 @@ function App() {
               <Route path="/weekly-customers" element={<WeeklyCustomersPage />} />
               <Route path="/store" element={<StorePage />} />
               <Route path="/store/:id" element={<StoreDetailPage />} />
+              <Route path="/store/:id/trending" element={<StoreTrendingPage />} />
               <Route path="/request-access" element={<RequestAccessPage />} />
             </Route>
           </Route>

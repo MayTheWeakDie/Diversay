@@ -137,3 +137,25 @@ def test_notification_acknowledgment_workflow():
     response = client.get("/analytics/acknowledged", headers=headers)
     assert response.status_code == 200
     assert len([x for x in response.json() if x == "delayed-99"]) == 1
+
+
+def test_store_analytics_trending_by_range():
+    """Verify store analytics returning top_products_by_range for timeframes."""
+    from models import Store
+    db = TestingSessionLocal()
+    store = Store(name="Analytics Test Store", state="Lagos", city="Ikeja", is_central=True)
+    db.add(store)
+    db.commit()
+    db.refresh(store)
+    
+    headers = get_auth_headers()
+    response = client.get(f"/stores/{store.id}/analytics", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert "top_products_by_range" in data
+    assert "1" in data["top_products_by_range"]
+    assert "7" in data["top_products_by_range"]
+    assert "30" in data["top_products_by_range"]
+    assert "90" in data["top_products_by_range"]
+    assert "all" in data["top_products_by_range"]
+

@@ -119,6 +119,7 @@ def seed_stores():
         
         for store_data in stores_data:
             store_name = store_data["name"]
+            is_new_store = False
             if store_name not in existing_stores:
                 logger.info(f"Seeding store: {store_name}")
                 store = Store(**store_data)
@@ -126,15 +127,21 @@ def seed_stores():
                 db.commit()
                 db.refresh(store)
                 existing_stores[store_name] = store
+                is_new_store = True
             
             store = existing_stores[store_name]
-            for p in products:
-                if (store.id, p.id) not in existing_inv_keys:
-                    stock_val = float(random.randint(150, 600)) if store.is_central else float(random.randint(0, 120))
-                    if not store.is_central and random.random() < 0.15:
-                        stock_val = 0.0
-                    new_inv = StoreInventory(store_id=store.id, product_id=p.id, stock=stock_val)
-                    db.add(new_inv)
+            
+            # Only seed initial random inventory for brand new stores.
+            # Otherwise, if an admin deletes a product from an existing store,
+            # it would get recreated on every server restart.
+            if is_new_store:
+                for p in products:
+                    if (store.id, p.id) not in existing_inv_keys:
+                        stock_val = float(random.randint(150, 600)) if store.is_central else float(random.randint(0, 120))
+                        if not store.is_central and random.random() < 0.15:
+                            stock_val = 0.0
+                        new_inv = StoreInventory(store_id=store.id, product_id=p.id, stock=stock_val)
+                        db.add(new_inv)
                     
         db.commit()
         logger.info("Stores and inventories seeded successfully!")

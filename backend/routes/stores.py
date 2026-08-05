@@ -8,7 +8,7 @@ from schemas import (
 )
 from auth import get_current_user, check_write_access
 from utils import get_order_with_details
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 import uuid
 
@@ -376,6 +376,7 @@ def transfer_inter_store(
 def get_store_analytics(
     store_id: int,
     days: int = 7,
+    trending_days: Optional[str] = "all",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -383,6 +384,7 @@ def get_store_analytics(
     
     Args:
         days: Number of days of movement data to return (1=today, 7=this week, 30, 90, etc.)
+        trending_days: Timeframe filter for trending products ("1", "7", "30", "90", "all")
     """
     from models import Order, OrderLineItem
     from datetime import datetime, timedelta
@@ -408,9 +410,18 @@ def get_store_analytics(
     total_incoming = len(incoming_orders)
     total_outgoing = len(outgoing_orders)
     
-    all_order_ids = [o.id for o in incoming_orders] + [o.id for o in outgoing_orders]
+    now = datetime.utcnow()
+    all_orders_list = incoming_orders + outgoing_orders
+    orders_map = {o.id: o for o in all_orders_list}
+    all_order_ids = list(orders_map.keys())
     
-    trending = {}
+    trending_by_range = {
+        "1": {},
+        "7": {},
+        "30": {},
+        "90": {},
+        "all": {}
+    }
     if all_order_ids:
         items = db.query(OrderLineItem).filter(
             OrderLineItem.order_id.in_(all_order_ids)
@@ -418,13 +429,36 @@ def get_store_analytics(
             joinedload(OrderLineItem.product)
         ).all()
         for item in items:
+            order = orders_map.get(item.order_id)
+            if not order:
+                continue
             product_name = item.product.name if item.product else f"Product #{item.product_id}"
-            trending[product_name] = trending.get(product_name, 0) + item.quantity
+            order_time = order.dispatch_time or order.created_at
             
-    top_products = [
-        {"name": name, "quantity": qty}
-        for name, qty in sorted(trending.items(), key=lambda x: x[1], reverse=True)[:5]
-    ]
+            trending_by_range["all"][product_name] = trending_by_range["all"].get(product_name, 0) + item.quantity
+            
+            if order_time:
+                delta_days = (now - order_time).total_seconds() / 86400.0
+                if delta_days <= 1.0:
+                    trending_by_range["1"][product_name] = trending_by_range["1"].get(product_name, 0) + item.quantity
+                if delta_days <= 7.0:
+                    trending_by_range["7"][product_name] = trending_by_range["7"].get(product_name, 0) + item.quantity
+                if delta_days <= 30.0:
+                    trending_by_range["30"][product_name] = trending_by_range["30"].get(product_name, 0) + item.quantity
+                if delta_days <= 90.0:
+                    trending_by_range["90"][product_name] = trending_by_range["90"].get(product_name, 0) + item.quantity
+            
+    def format_top_5(trend_dict):
+        return [
+            {"name": name, "quantity": qty}
+            for name, qty in sorted(trend_dict.items(), key=lambda x: x[1], reverse=True)[:5]
+        ]
+        
+    top_products_by_range = {
+        r: format_top_5(td) for r, td in trending_by_range.items()
+    }
+    
+    selected_top = top_products_by_range.get(str(trending_days), top_products_by_range["all"])
     
     inv_items = db.query(StoreInventory).filter(
         StoreInventory.store_id == store_id
@@ -450,7 +484,6 @@ def get_store_analytics(
     # Clamp days to a sensible range (1..365)
     days = max(1, min(days, 365))
     movement_dates = {}
-    now = datetime.utcnow()
     
     if days == 1:
         # Today: 4-hour interval buckets for a smooth area chart
@@ -508,7 +541,8 @@ def get_store_analytics(
     return {
         "total_incoming": total_incoming,
         "total_outgoing": total_outgoing,
-        "top_products": top_products,
+        "top_products": selected_top,
+        "top_products_by_range": top_products_by_range,
         "dsl_count": dsl_count,
         "dslp_count": dslp_count,
         "dsl_stock": dsl_stock,
@@ -516,4 +550,98 @@ def get_store_analytics(
         "movement_data": movement_data,
         "incoming_transactions": incoming_transactions,
         "outgoing_transactions": outgoing_transactions
+    }
+
+@router.get("/{store_id}/analytics/trending-details")
+def get_store_trending_details(
+    store_id: int,
+    timeframe: str = "all",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get detailed trending products with customer breakdown.
+    
+    Args:
+        timeframe: "1", "7", "30", "90", or "all"
+    """
+    from models import Order, OrderLineItem, Store
+    from sqlalchemy.orm import joinedload
+    from datetime import datetime
+    
+    store = db.query(Store).filter(Store.id == store_id, Store.is_deleted == False).first()
+    if not store:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
+        
+    # We look at outgoing orders from this store to see which customers are buying
+    outgoing_orders = db.query(Order).filter(
+        Order.source_store_id == store_id, 
+        Order.is_deleted == False
+    ).options(
+        joinedload(Order.line_items).joinedload(OrderLineItem.product),
+        joinedload(Order.customer),
+        joinedload(Order.destination_store)
+    ).all()
+    
+    now = datetime.utcnow()
+    
+    # Structure: dict of product_name -> { "total_quantity": X, "customers": { customer_name: quantity } }
+    product_map = {}
+    
+    for order in outgoing_orders:
+        order_time = order.dispatch_time or order.created_at
+        
+        # Check timeframe
+        if order_time and timeframe != "all":
+            delta_days = (now - order_time).total_seconds() / 86400.0
+            if timeframe == "1" and delta_days > 1.0:
+                continue
+            if timeframe == "7" and delta_days > 7.0:
+                continue
+            if timeframe == "30" and delta_days > 30.0:
+                continue
+            if timeframe == "90" and delta_days > 90.0:
+                continue
+                
+        # Determine customer name (either actual customer or destination store if it's an internal transfer)
+        if order.customer:
+            customer_name = order.customer.name
+        elif order.destination_store:
+            customer_name = f"Store: {order.destination_store.name}"
+        else:
+            customer_name = "Unknown"
+            
+        for item in order.line_items:
+            product_name = item.product.name if item.product else f"Product #{item.product_id}"
+            
+            if product_name not in product_map:
+                product_map[product_name] = {
+                    "product_name": product_name,
+                    "total_quantity": 0,
+                    "customers": {}
+                }
+                
+            product_map[product_name]["total_quantity"] += item.quantity
+            product_map[product_name]["customers"][customer_name] = product_map[product_name]["customers"].get(customer_name, 0) + item.quantity
+
+    # Format output to a list
+    results = []
+    for p_name, p_data in product_map.items():
+        # Convert customers dict to a list for frontend mapping
+        customer_list = [
+            {"name": c_name, "quantity": c_qty}
+            for c_name, c_qty in sorted(p_data["customers"].items(), key=lambda x: x[1], reverse=True)
+        ]
+        
+        results.append({
+            "product_name": p_name,
+            "total_quantity": p_data["total_quantity"],
+            "customers": customer_list
+        })
+        
+    # Sort products by total quantity descending
+    results.sort(key=lambda x: x["total_quantity"], reverse=True)
+    
+    return {
+        "timeframe": timeframe,
+        "products": results
     }
