@@ -603,16 +603,28 @@ def get_store_trending_details(
             if timeframe == "90" and delta_days > 90.0:
                 continue
                 
-        # Determine customer name (either actual customer or destination store if it's an internal transfer)
+        # Skip inter-store transfers so only real customer orders contribute to trending analytics
+        if order.destination_store_id is not None or (order.customer and ("transfer" in order.customer.name.lower() or order.customer.name == "Inter-Store Transfer")):
+            continue
+
+        # Determine customer name, location, and transfer status
         if order.customer:
             customer_name = order.customer.name
-        elif order.destination_store:
-            customer_name = f"Store: {order.destination_store.name}"
+            customer_state = order.customer.state or "Unspecified State"
+            customer_city = order.customer.city or ""
+            customer_address = order.customer.address or ""
+            is_transfer = False
         else:
-            customer_name = "Unknown"
+            customer_name = "Unknown Customer"
+            customer_state = "Unspecified State"
+            customer_city = ""
+            customer_address = ""
+            is_transfer = False
             
         for item in order.line_items:
             product_name = item.product.name if item.product else f"Product #{item.product_id}"
+            unit_price = item.unit_price or (item.product.unit_price if item.product else 0.0) or 0.0
+            line_total = item.quantity * unit_price
             
             if product_name not in product_map:
                 product_map[product_name] = {
@@ -622,20 +634,58 @@ def get_store_trending_details(
                 }
                 
             product_map[product_name]["total_quantity"] += item.quantity
-            product_map[product_name]["customers"][customer_name] = product_map[product_name]["customers"].get(customer_name, 0) + item.quantity
+            p_cust = product_map[product_name]["customers"]
+            if customer_name not in p_cust:
+                p_cust[customer_name] = {
+                    "name": customer_name,
+                    "quantity": 0,
+                    "total_spent": 0.0,
+                    "state": customer_state,
+                    "city": customer_city,
+                    "address": customer_address,
+                    "is_transfer": is_transfer,
+                    "orders": []
+                }
+            else:
+                # If we merged multiple customer records by name, upgrade the state if we find a better one
+                if p_cust[customer_name]["state"] == "Unspecified State" and customer_state != "Unspecified State":
+                    p_cust[customer_name]["state"] = customer_state
+                    p_cust[customer_name]["city"] = customer_city
+                    p_cust[customer_name]["address"] = customer_address
+
+            p_cust[customer_name]["quantity"] += item.quantity
+            p_cust[customer_name]["total_spent"] += line_total
+            p_cust[customer_name]["orders"].append({
+                "order_number": order.order_number,
+                "date": (order.dispatch_time or order.created_at or datetime.utcnow()).strftime("%Y-%m-%d"),
+                "quantity": item.quantity,
+                "unit_price": unit_price,
+                "total_amount": line_total
+            })
 
     # Format output to a list
     results = []
     for p_name, p_data in product_map.items():
         # Convert customers dict to a list for frontend mapping
         customer_list = [
-            {"name": c_name, "quantity": c_qty}
-            for c_name, c_qty in sorted(p_data["customers"].items(), key=lambda x: x[1], reverse=True)
+            {
+                "name": c_info["name"],
+                "quantity": c_info["quantity"],
+                "total_spent": round(c_info["total_spent"], 2),
+                "order_count": len(c_info["orders"]),
+                "state": c_info["state"],
+                "city": c_info["city"],
+                "address": c_info["address"],
+                "is_transfer": c_info["is_transfer"],
+                "orders": c_info["orders"]
+            }
+            for c_info in sorted(p_data["customers"].values(), key=lambda x: x["quantity"], reverse=True)
         ]
         
         results.append({
             "product_name": p_name,
             "total_quantity": p_data["total_quantity"],
+            "total_revenue": round(sum(c["total_spent"] for c in customer_list), 2),
             "customers": customer_list
         })
         

@@ -338,6 +338,35 @@ export default function StoreDetailPage() {
   const [movementRange, setMovementRange] = useState('7')
   const [movementLoading, setMovementLoading] = useState(false)
 
+  // Store info inline editing
+  const [isEditingStoreInfo, setIsEditingStoreInfo] = useState(false)
+  const [editPhone, setEditPhone] = useState('')
+  const [editManagerName, setEditManagerName] = useState('')
+  const [savingStoreInfo, setSavingStoreInfo] = useState(false)
+
+  const handleStartEditStoreInfo = () => {
+    setEditPhone(store?.phone || '')
+    setEditManagerName(store?.manager_name || '')
+    setIsEditingStoreInfo(true)
+  }
+
+  const handleSaveStoreInfo = async () => {
+    try {
+      setSavingStoreInfo(true)
+      const res = await api.put(`/stores/${id}`, {
+        phone: editPhone.trim() || null,
+        manager_name: editManagerName.trim() || null
+      })
+      setStore(res.data)
+      setIsEditingStoreInfo(false)
+    } catch (err) {
+      console.error('Failed to update store details:', err)
+      alert(err.response?.data?.detail || 'Failed to update store details')
+    } finally {
+      setSavingStoreInfo(false)
+    }
+  }
+
   // Trending products range selector
   const [trendingRange, setTrendingRange] = useState('all')
 
@@ -728,16 +757,75 @@ export default function StoreDetailPage() {
                     Central Store (HQ)
                   </span>
                 )}
-                {store.phone && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950 border border-zinc-800 text-zinc-300 text-xs font-semibold rounded-xl">
-                    <Phone size={13} className="text-zinc-500" />
-                    <span>{store.phone}</span>
+                {isEditingStoreInfo ? (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950 border border-emerald-500/50 text-zinc-100 text-xs rounded-xl shadow-inner">
+                      <Phone size={13} className="text-emerald-400 shrink-0" />
+                      <input
+                        type="text"
+                        placeholder="Phone number..."
+                        value={editPhone}
+                        onChange={(e) => setEditPhone(e.target.value)}
+                        className="bg-transparent text-white text-xs font-semibold focus:outline-none w-36"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950 border border-emerald-500/50 text-zinc-100 text-xs rounded-xl shadow-inner">
+                      <User size={13} className="text-emerald-400 shrink-0" />
+                      <span className="text-zinc-400 text-xs font-semibold">Manager:</span>
+                      <input
+                        type="text"
+                        placeholder="Manager name..."
+                        value={editManagerName}
+                        onChange={(e) => setEditManagerName(e.target.value)}
+                        className="bg-transparent text-white text-xs font-semibold focus:outline-none w-36"
+                      />
+                    </div>
+                    <button
+                      onClick={handleSaveStoreInfo}
+                      disabled={savingStoreInfo}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-black text-xs font-bold rounded-xl transition-all shadow-md active:scale-95 disabled:opacity-50"
+                    >
+                      {savingStoreInfo ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+                      <span>Save</span>
+                    </button>
+                    <button
+                      onClick={() => setIsEditingStoreInfo(false)}
+                      className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-xl transition-all"
+                      title="Cancel"
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
-                )}
-                {store.manager_name && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950 border border-zinc-800 text-zinc-300 text-xs font-semibold rounded-xl">
-                    <User size={13} className="text-zinc-500" />
-                    <span>Manager: {store.manager_name}</span>
+                ) : (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div 
+                      onClick={hasWriteAccess ? handleStartEditStoreInfo : undefined}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950 border border-zinc-800 text-zinc-300 text-xs font-semibold rounded-xl ${hasWriteAccess ? 'cursor-pointer hover:border-zinc-700 hover:text-white transition-all group' : ''}`}
+                      title={hasWriteAccess ? "Click to edit phone number & manager" : ""}
+                    >
+                      <Phone size={13} className="text-zinc-500 group-hover:text-emerald-400 transition-colors" />
+                      <span>{store.phone || <span className="text-zinc-500 italic">No phone set</span>}</span>
+                    </div>
+
+                    <div 
+                      onClick={hasWriteAccess ? handleStartEditStoreInfo : undefined}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950 border border-zinc-800 text-zinc-300 text-xs font-semibold rounded-xl ${hasWriteAccess ? 'cursor-pointer hover:border-zinc-700 hover:text-white transition-all group' : ''}`}
+                      title={hasWriteAccess ? "Click to edit phone number & manager" : ""}
+                    >
+                      <User size={13} className="text-zinc-500 group-hover:text-emerald-400 transition-colors" />
+                      <span>Manager: {store.manager_name || <span className="text-zinc-500 italic">Unassigned</span>}</span>
+                    </div>
+
+                    {hasWriteAccess && (
+                      <button
+                        onClick={handleStartEditStoreInfo}
+                        className="p-1.5 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-emerald-400 rounded-xl transition-all flex items-center gap-1 text-xs font-semibold"
+                        title="Edit Phone & Manager"
+                      >
+                        <Edit3 size={13} />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -892,20 +980,20 @@ export default function StoreDetailPage() {
                     <BarChart3 size={16} className="text-emerald-400" />
                     <h3 className="text-xs font-bold text-white uppercase tracking-wider">Top 5 Trending Products</h3>
                   </div>
-                  <div className="flex bg-zinc-950 p-1 border border-zinc-800 rounded-xl overflow-x-auto">
-                    {TRENDING_RANGES.map(range => (
-                      <button
-                        key={range.value}
-                        onClick={() => setTrendingRange(range.value)}
-                        className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all duration-200 whitespace-nowrap ${
-                          trendingRange === range.value
-                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
-                            : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-                        }`}
-                      >
-                        {range.label}
-                      </button>
-                    ))}
+                  <div className="relative flex items-center">
+                    <select
+                      value={trendingRange}
+                      onChange={(e) => setTrendingRange(e.target.value)}
+                      className="appearance-none bg-zinc-950 text-emerald-400 border border-zinc-800/80 hover:border-zinc-700 rounded-xl px-3 py-1.5 pr-8 text-[11px] font-bold focus:outline-none focus:border-emerald-500/50 cursor-pointer shadow-sm transition-colors"
+                      style={{ colorScheme: 'dark' }}
+                    >
+                      {TRENDING_RANGES.map(range => (
+                        <option key={range.value} value={range.value} className="bg-zinc-900 text-zinc-100 py-1">
+                          {range.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} className="absolute right-2.5 pointer-events-none text-emerald-400" />
                   </div>
                 </div>
                 <div 
@@ -1025,20 +1113,20 @@ export default function StoreDetailPage() {
                     {movementLoading && <span className="ml-2 text-zinc-500 normal-case font-medium">Updating...</span>}
                   </h3>
                 </div>
-                <div className="flex bg-zinc-950 p-1 border border-zinc-800 rounded-xl">
-                  {MOVEMENT_RANGES.map(range => (
-                    <button
-                      key={range.value}
-                      onClick={() => setMovementRange(range.value)}
-                      className={`px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all duration-200 whitespace-nowrap ${
-                        movementRange === range.value
-                          ? 'bg-purple-500/15 text-purple-400 border border-purple-500/25 shadow-sm'
-                          : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-                      }`}
-                    >
-                      {range.label}
-                    </button>
-                  ))}
+                <div className="relative flex items-center">
+                  <select
+                    value={movementRange}
+                    onChange={(e) => setMovementRange(e.target.value)}
+                    className="appearance-none bg-zinc-950 text-purple-400 border border-zinc-800/80 hover:border-zinc-700 rounded-xl px-3 py-1.5 pr-8 text-[11px] font-bold focus:outline-none focus:border-purple-500/50 cursor-pointer shadow-sm transition-colors"
+                    style={{ colorScheme: 'dark' }}
+                  >
+                    {MOVEMENT_RANGES.map(range => (
+                      <option key={range.value} value={range.value} className="bg-zinc-900 text-zinc-100 py-1">
+                        {range.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-2.5 pointer-events-none text-purple-400" />
                 </div>
               </div>
               <div className={`flex-1 w-full h-[250px] transition-opacity duration-200 ${movementLoading ? 'opacity-40' : 'opacity-100'}`}>
