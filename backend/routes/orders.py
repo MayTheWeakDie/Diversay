@@ -699,31 +699,61 @@ def update_order(
     
     # Revert and recreate line items/reference cards if either is provided
     if order_update.reference_cards is not None or order_update.line_items is not None:
+        # Bulk load all necessary data to avoid N+1 queries during inventory updates
+        product_ids = set()
+        for old_item in order.line_items:
+            product_ids.add(old_item.product_id)
+        if order_update.reference_cards:
+            for card_data in order_update.reference_cards:
+                for item in card_data.line_items:
+                    product_ids.add(item.product_id)
+        if order_update.line_items:
+            for item in order_update.line_items:
+                product_ids.add(item.product_id)
+
+        products_dict = {p.id: p for p in db.query(Product).filter(Product.id.in_(product_ids)).all()}
+        
+        store_ids = set()
+        if order.source_store_id: store_ids.add(order.source_store_id)
+        if order.destination_store_id: store_ids.add(order.destination_store_id)
+        
+        inventories_dict = {}
+        if store_ids and product_ids:
+            invs = db.query(StoreInventory).filter(
+                StoreInventory.store_id.in_(store_ids),
+                StoreInventory.product_id.in_(product_ids)
+            ).all()
+            for inv in invs:
+                inventories_dict[(inv.store_id, inv.product_id)] = inv
+                
+        source_store = None
+        if order.source_store_id:
+            source_store = db.query(Store).filter(Store.id == order.source_store_id).first()
+
+        def get_or_create_inv(store_id, product_id):
+            key = (store_id, product_id)
+            if key not in inventories_dict:
+                inv = StoreInventory(store_id=store_id, product_id=product_id, stock=0.0)
+                db.add(inv)
+                inventories_dict[key] = inv
+            return inventories_dict[key]
+
         # 1. Revert stock for all existing line items
         for old_item in order.line_items:
-            product = db.query(Product).filter(Product.id == old_item.product_id).first()
+            product = products_dict.get(old_item.product_id)
             if product:
                 factor = get_conversion_factor(product.name) if old_item.unit == UnitType.CARTON else 1.0
                 qty_pcs = old_item.quantity * factor
                 # Revert source store deduction (add back)
                 if order.source_store_id:
-                    src_inv = db.query(StoreInventory).filter(
-                        StoreInventory.store_id == order.source_store_id,
-                        StoreInventory.product_id == old_item.product_id
-                    ).first()
-                    if src_inv:
-                        src_inv.stock += qty_pcs
+                    src_inv = get_or_create_inv(order.source_store_id, old_item.product_id)
+                    src_inv.stock += qty_pcs
                 # Revert destination store credit (subtract)
                 if order.destination_store_id:
-                    dest_inv = db.query(StoreInventory).filter(
-                        StoreInventory.store_id == order.destination_store_id,
-                        StoreInventory.product_id == old_item.product_id
-                    ).first()
-                    if dest_inv:
-                        dest_inv.stock -= qty_pcs
-                        source_store = db.query(Store).filter(Store.id == order.source_store_id).first()
-                        if source_store and source_store.is_central:
-                            dest_inv.stock += qty_pcs
+                    dest_inv = get_or_create_inv(order.destination_store_id, old_item.product_id)
+                    dest_inv.stock -= qty_pcs
+                    if source_store and source_store.is_central:
+                        dest_inv.stock += qty_pcs
 
         # 2. Delete old records
         db.query(OrderLineItem).filter(OrderLineItem.order_id == order_id).delete()
@@ -747,10 +777,7 @@ def update_order(
                 db.flush()
 
                 for item in card_data.line_items:
-                    product = db.query(Product).filter(
-                        Product.id == item.product_id,
-                        Product.is_deleted == False
-                    ).first()
+                    product = products_dict.get(item.product_id)
                     if not product:
                         raise HTTPException(
                             status_code=status.HTTP_404_NOT_FOUND,
@@ -770,33 +797,17 @@ def update_order(
                     factor = get_conversion_factor(product.name) if item.unit == UnitType.CARTON else 1.0
                     qty_pcs = item.quantity * factor
                     if order.source_store_id:
-                        src_inv = db.query(StoreInventory).filter(
-                            StoreInventory.store_id == order.source_store_id,
-                            StoreInventory.product_id == item.product_id
-                        ).first()
-                        if not src_inv:
-                            src_inv = StoreInventory(store_id=order.source_store_id, product_id=item.product_id, stock=0.0)
-                            db.add(src_inv)
+                        src_inv = get_or_create_inv(order.source_store_id, item.product_id)
                         src_inv.stock -= qty_pcs
                     if order.destination_store_id:
-                        dest_inv = db.query(StoreInventory).filter(
-                            StoreInventory.store_id == order.destination_store_id,
-                            StoreInventory.product_id == item.product_id
-                        ).first()
-                        if not dest_inv:
-                            dest_inv = StoreInventory(store_id=order.destination_store_id, product_id=item.product_id, stock=0.0)
-                            db.add(dest_inv)
+                        dest_inv = get_or_create_inv(order.destination_store_id, item.product_id)
                         dest_inv.stock += qty_pcs
-                        source_store = db.query(Store).filter(Store.id == order.source_store_id).first()
                         if source_store and source_store.is_central:
                             dest_inv.stock -= qty_pcs
         else:
             # Flat mode
             for item in order_update.line_items:
-                product = db.query(Product).filter(
-                    Product.id == item.product_id,
-                    Product.is_deleted == False
-                ).first()
+                product = products_dict.get(item.product_id)
                 if not product:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
@@ -815,24 +826,11 @@ def update_order(
                 factor = get_conversion_factor(product.name) if item.unit == UnitType.CARTON else 1.0
                 qty_pcs = item.quantity * factor
                 if order.source_store_id:
-                    src_inv = db.query(StoreInventory).filter(
-                        StoreInventory.store_id == order.source_store_id,
-                        StoreInventory.product_id == item.product_id
-                    ).first()
-                    if not src_inv:
-                        src_inv = StoreInventory(store_id=order.source_store_id, product_id=item.product_id, stock=0.0)
-                        db.add(src_inv)
+                    src_inv = get_or_create_inv(order.source_store_id, item.product_id)
                     src_inv.stock -= qty_pcs
                 if order.destination_store_id:
-                    dest_inv = db.query(StoreInventory).filter(
-                        StoreInventory.store_id == order.destination_store_id,
-                        StoreInventory.product_id == item.product_id
-                    ).first()
-                    if not dest_inv:
-                        dest_inv = StoreInventory(store_id=order.destination_store_id, product_id=item.product_id, stock=0.0)
-                        db.add(dest_inv)
+                    dest_inv = get_or_create_inv(order.destination_store_id, item.product_id)
                     dest_inv.stock += qty_pcs
-                    source_store = db.query(Store).filter(Store.id == order.source_store_id).first()
                     if source_store and source_store.is_central:
                         dest_inv.stock -= qty_pcs
     
@@ -855,7 +853,23 @@ def update_order(
     )
     
     db.commit()
-    db.refresh(order)
+    
+    # Refetch order with eager loading to prevent N+1 query problem
+    s_id = str(order_id).strip()
+    query = db.query(Order).filter(Order.is_deleted == False)
+    if s_id.isdigit():
+        query = query.filter((Order.id == int(s_id)) | (Order.order_number == s_id))
+    else:
+        query = query.filter(Order.order_number == s_id)
+        
+    order = query.options(
+        joinedload(Order.customer),
+        joinedload(Order.created_by_user),
+        joinedload(Order.line_items).joinedload(OrderLineItem.product),
+        joinedload(Order.reference_cards).joinedload(OrderReferenceCard.line_items).joinedload(OrderLineItem.product),
+        joinedload(Order.source_store),
+        joinedload(Order.destination_store)
+    ).first()
     
     return get_order_with_details(order)
 

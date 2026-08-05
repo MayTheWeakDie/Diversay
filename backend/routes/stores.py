@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session, joinedload
 from database import get_db
-from models import User, Store, StoreInventory, Product, Customer, Order, OrderLineItem, OrderStatus, AuditLog, ActionType
+from models import User, Store, StoreInventory, Product, Customer, Order, OrderLineItem, OrderReferenceCard, OrderStatus, AuditLog, ActionType
 from schemas import (
     StoreCreate, StoreUpdate, StoreResponse, StoreInventoryResponse, StoreInventoryUpdate,
     InterStoreTransferRequest, InterStoreTransferResponse
@@ -402,7 +402,7 @@ def get_store_analytics(
         joinedload(Order.created_by_user),
         joinedload(Order.source_store),
         joinedload(Order.destination_store),
-        joinedload(Order.reference_cards)
+        joinedload(Order.reference_cards).joinedload(OrderReferenceCard.line_items).joinedload(OrderLineItem.product)
     ).all()
     
     outgoing_orders = db.query(Order).filter(
@@ -414,7 +414,7 @@ def get_store_analytics(
         joinedload(Order.created_by_user),
         joinedload(Order.source_store),
         joinedload(Order.destination_store),
-        joinedload(Order.reference_cards)
+        joinedload(Order.reference_cards).joinedload(OrderReferenceCard.line_items).joinedload(OrderLineItem.product)
     ).all()
     
     total_incoming = len(incoming_orders)

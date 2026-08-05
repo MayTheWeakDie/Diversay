@@ -620,8 +620,23 @@ export default function OrderDetailPage() {
   }
 
   const handleSaveEdit = async () => {
-    if (!editDispatchTime || !editExpectedDelivery) {
-      alert("Please specify dispatch and expected delivery times.")
+    const safeToISO = (val) => {
+      if (!val) return null
+      let s = val
+      if (typeof s === 'string' && !s.includes('Z') && !/\+\d{2}:\d{2}$/.test(s) && !/-\d{2}:\d{2}$/.test(s)) {
+        s = s + 'Z'
+      }
+      const d = new Date(s)
+      if (isNaN(d.getTime())) return null
+      return d.toISOString()
+    }
+
+    const dispatchISO = safeToISO(editDispatchTime)
+    const expectedISO = safeToISO(editExpectedDelivery)
+    const actualISO = safeToISO(editActualDelivery)
+
+    if (!dispatchISO || !expectedISO) {
+      alert("Please specify valid dispatch and expected delivery times.")
       return
     }
 
@@ -636,8 +651,8 @@ export default function OrderDetailPage() {
       }
 
       // Check for duplicate invoice/delivery numbers within the form
-      const invoices = editReferenceCards.map(c => c.invoice_number.trim().toLowerCase())
-      const waybills = editReferenceCards.map(c => c.waybill_number.trim().toLowerCase())
+      const invoices = editReferenceCards.map(c => (c.invoice_number || '').trim().toLowerCase())
+      const waybills = editReferenceCards.map(c => (c.waybill_number || '').trim().toLowerCase())
       if (new Set(invoices).size !== invoices.length) {
         alert("Duplicate Invoice Numbers detected in reference cards.")
         return
@@ -673,9 +688,9 @@ export default function OrderDetailPage() {
         customer_id: order.customer_id,
         waybill_number: hasRefCards ? null : (editWaybill || null),
         invoice_number: hasRefCards ? null : (editInvoice || null),
-        dispatch_time: new Date(editDispatchTime).toISOString(),
-        expected_delivery_time: new Date(editExpectedDelivery).toISOString(),
-        actual_delivery_time: editActualDelivery ? new Date(editActualDelivery).toISOString() : null,
+        dispatch_time: dispatchISO,
+        expected_delivery_time: expectedISO,
+        actual_delivery_time: actualISO,
         driver_name: editDriver || null,
         vehicle_number: editVehicle || null,
         notes: editNotes || null,
@@ -687,8 +702,8 @@ export default function OrderDetailPage() {
 
       if (hasRefCards) {
         payload.reference_cards = editReferenceCards.map(card => ({
-          invoice_number: card.invoice_number.trim(),
-          waybill_number: card.waybill_number.trim(),
+          invoice_number: (card.invoice_number || '').trim(),
+          waybill_number: (card.waybill_number || '').trim(),
           brand: card.brand,
           line_items: card.line_items.map(item => ({
             product_id: parseInt(item.product_id),
@@ -709,7 +724,7 @@ export default function OrderDetailPage() {
       await fetchOrderDetails()
     } catch (err) {
       console.error("Failed to save changes:", err)
-      alert(err.response?.data?.detail || "Failed to save manifest details.")
+      alert(err.response?.data?.detail || err.message || "Failed to save manifest details.")
     } finally {
       setLoading(false)
     }
