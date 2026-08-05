@@ -397,14 +397,24 @@ def get_store_analytics(
         Order.destination_store_id == store_id, 
         Order.is_deleted == False
     ).options(
-        joinedload(Order.line_items)
+        joinedload(Order.line_items).joinedload(OrderLineItem.product),
+        joinedload(Order.customer),
+        joinedload(Order.created_by_user),
+        joinedload(Order.source_store),
+        joinedload(Order.destination_store),
+        joinedload(Order.reference_cards)
     ).all()
     
     outgoing_orders = db.query(Order).filter(
         Order.source_store_id == store_id, 
         Order.is_deleted == False
     ).options(
-        joinedload(Order.line_items)
+        joinedload(Order.line_items).joinedload(OrderLineItem.product),
+        joinedload(Order.customer),
+        joinedload(Order.created_by_user),
+        joinedload(Order.source_store),
+        joinedload(Order.destination_store),
+        joinedload(Order.reference_cards)
     ).all()
     
     total_incoming = len(incoming_orders)
@@ -412,8 +422,6 @@ def get_store_analytics(
     
     now = datetime.utcnow()
     all_orders_list = incoming_orders + outgoing_orders
-    orders_map = {o.id: o for o in all_orders_list}
-    all_order_ids = list(orders_map.keys())
     
     trending_by_range = {
         "1": {},
@@ -422,16 +430,9 @@ def get_store_analytics(
         "90": {},
         "all": {}
     }
-    if all_order_ids:
-        items = db.query(OrderLineItem).filter(
-            OrderLineItem.order_id.in_(all_order_ids)
-        ).options(
-            joinedload(OrderLineItem.product)
-        ).all()
-        for item in items:
-            order = orders_map.get(item.order_id)
-            if not order:
-                continue
+    
+    for order in all_orders_list:
+        for item in order.line_items:
             product_name = item.product.name if item.product else f"Product #{item.product_id}"
             order_time = order.dispatch_time or order.created_at
             
