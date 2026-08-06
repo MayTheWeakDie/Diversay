@@ -18,6 +18,7 @@ import StoreTrendingPage from './pages/StoreTrendingPage'
 import SplashPage from './pages/SplashPage'
 import RequestAccessPage from './pages/RequestAccessPage'
 import WeeklyCustomersPage from './pages/WeeklyCustomersPage'
+import GlobalAnalyticsPage from './pages/GlobalAnalyticsPage'
 
 function App() {
   return (
@@ -41,6 +42,7 @@ function App() {
               <Route path="/store" element={<StorePage />} />
               <Route path="/store/:id" element={<StoreDetailPage />} />
               <Route path="/store/:id/trending" element={<StoreTrendingPage />} />
+              <Route path="/analytics/global" element={<GlobalAnalyticsPage />} />
               <Route path="/request-access" element={<RequestAccessPage />} />
             </Route>
           </Route>

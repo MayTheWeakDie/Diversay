@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routes import auth, customers, products, orders, analytics, stores, drivers, vehicles
+from routes import auth, customers, products, orders, analytics, stores, drivers, vehicles, global_analytics
 from config import get_settings
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -312,6 +312,7 @@ app.include_router(customers.router)
 app.include_router(products.router)
 app.include_router(orders.router)
 app.include_router(analytics.router)
+app.include_router(global_analytics.router)
 app.include_router(stores.router)
 app.include_router(drivers.router)
 app.include_router(vehicles.router)

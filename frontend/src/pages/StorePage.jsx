@@ -2,18 +2,20 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import api, { getWithCache, invalidateCache } from '../services/api'
-import { 
-  Store, 
-  MapPin, 
-  Phone, 
-  User, 
-  ChevronRight, 
-  Plus, 
+import {
+  Store,
+  MapPin,
+  Phone,
+  User,
+  ChevronRight,
+  Plus,
   Crown,
   Warehouse,
   X,
   Building2,
-  Factory
+  Factory,
+  BarChart3,
+  Activity
 } from 'lucide-react'
 
 export default function StorePage() {
@@ -32,7 +34,7 @@ export default function StorePage() {
     try {
       const isCurrentlyLoading = stores.length === 0
       if (isCurrentlyLoading) setLoading(true)
-      
+
       const { data } = await getWithCache('/stores/', {
         onCacheUpdate: (newData) => {
           setStores(newData || [])
@@ -81,6 +83,32 @@ export default function StorePage() {
             Add New Store
           </button>
         )}
+      </div>
+
+      {/* ── Global Analytics Entry Point (White-themed & Positioned directly below Store Registry Header) ── */}
+      <div
+        onClick={() => navigate('/analytics/global')}
+        className="bg-zinc-900/80 border border-zinc-800/90 rounded-2xl p-5 cursor-pointer group hover:border-zinc-700/90 hover:bg-zinc-900 transition-all duration-300 shadow-xl"
+      >
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700/80 flex items-center justify-center text-white group-hover:scale-105 transition-transform duration-300">
+              <BarChart3 size={24} className="text-white" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center gap-2">
+                Global Analytics
+                <Activity size={15} className="text-white" />
+              </h3>
+              <p className="text-zinc-400 text-xs mt-0.5">Cross-store intelligence — products, seasons, zones, expenses & more</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 text-white border border-zinc-700/80 rounded-xl text-xs font-bold group-hover:bg-white group-hover:text-zinc-950 group-hover:border-white transition-all duration-200 shadow-sm">
+            <span>View Dashboard</span>
+            <ChevronRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
+          </div>
+        </div>
       </div>
 
       {/* Store Cards Grid */}
@@ -184,6 +212,8 @@ export default function StorePage() {
 
       {/* Add Store Modal */}
       {showAddModal && <AddStoreModal onClose={() => setShowAddModal(false)} onCreated={() => { setShowAddModal(false); fetchStores() }} />}
+
+
     </div>
   )
 }
