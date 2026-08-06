@@ -85,28 +85,31 @@ export default function StorePage() {
         )}
       </div>
 
-      {/* ── Global Analytics Entry Point (White-themed & Positioned directly below Store Registry Header) ── */}
+      {/* ── Global Analytics Entry Point (Full Area Monochromatic Hover Effect) ── */}
       <div
         onClick={() => navigate('/analytics/global')}
-        className="bg-zinc-900/80 border border-zinc-800/90 rounded-2xl p-5 cursor-pointer group hover:border-zinc-700/90 hover:bg-zinc-900 transition-all duration-300 shadow-xl"
+        className="relative overflow-hidden bg-zinc-900/80 border border-zinc-800/90 rounded-2xl p-5 cursor-pointer group hover:border-zinc-500/80 hover:bg-zinc-800/90 hover:shadow-[0_0_30px_rgba(255,255,255,0.08)] transition-all duration-300 active:scale-[0.99]"
       >
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        {/* Subtle white radial glow on hover */}
+        <div className="absolute inset-0 bg-gradient-to-r from-white/[0.03] via-white/[0.06] to-white/[0.03] opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700/80 flex items-center justify-center text-white group-hover:scale-105 transition-transform duration-300">
-              <BarChart3 size={24} className="text-white" />
+            <div className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700/80 flex items-center justify-center text-white group-hover:bg-white group-hover:text-zinc-950 group-hover:border-white group-hover:scale-110 transition-all duration-300 shadow-md">
+              <BarChart3 size={24} />
             </div>
             <div>
-              <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center gap-2">
+              <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center gap-2 group-hover:text-white">
                 Global Analytics
-                <Activity size={15} className="text-white" />
+                <Activity size={15} className="text-zinc-400 group-hover:text-white transition-colors animate-pulse" />
               </h3>
-              <p className="text-zinc-400 text-xs mt-0.5">Cross-store intelligence — products, seasons, zones, expenses & more</p>
+              <p className="text-zinc-400 group-hover:text-zinc-300 text-xs mt-0.5 transition-colors">Cross-store intelligence — products, seasons, zones, expenses & more</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 text-white border border-zinc-700/80 rounded-xl text-xs font-bold group-hover:bg-white group-hover:text-zinc-950 group-hover:border-white transition-all duration-200 shadow-sm">
             <span>View Dashboard</span>
-            <ChevronRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
+            <ChevronRight size={15} className="group-hover:translate-x-1 transition-transform duration-200" />
           </div>
         </div>
       </div>
