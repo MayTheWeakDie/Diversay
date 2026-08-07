@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from dotenv import dotenv_values
 from pydantic_settings import BaseSettings
@@ -25,4 +26,12 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings():
-    return Settings.model_validate(dotenv_values(ROOT_ENV_FILE))
+    env_dict = {}
+    if ROOT_ENV_FILE.exists():
+        env_dict.update(dotenv_values(ROOT_ENV_FILE))
+    for k, v in os.environ.items():
+        if k in Settings.model_fields:
+            env_dict[k] = v
+    cleaned = {k: v.strip() if isinstance(v, str) else v for k, v in env_dict.items()}
+    return Settings(**cleaned)
+
