@@ -36,8 +36,11 @@ import {
   Info,
   Plus,
   Trash2,
-  Edit3
+  Edit3,
+  Download
 } from 'lucide-react'
+import { generateDeliveryAcknowledgment } from '../utils/pdfGenerator'
+import DownloadAcknowledgmentModal from '../components/DownloadAcknowledgmentModal'
 
 // Dropdown component for fuzzy product search
 const ProductSearchDropdown = ({ query, products, onSelect }) => {
@@ -90,6 +93,7 @@ export default function OrderDetailPage() {
   const [error, setError] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showAccessGateway, setShowAccessGateway] = useState(false)
+  const [isAcknowledgmentModalOpen, setIsAcknowledgmentModalOpen] = useState(false)
   const { hasWriteAccess } = useAuth()
 
   // Preview state
@@ -858,36 +862,47 @@ export default function OrderDetailPage() {
           </div>
         </div>
         <div className="flex flex-col md:items-end gap-2">
-          {!isEditing && !previewCommit && (
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {!isEditing && (
               <button
-                onClick={() => {
-                  if (hasWriteAccess) {
-                    handleStartEdit()
-                  } else {
-                    setShowAccessGateway(true)
-                  }
-                }}
-                className="px-4 py-2 border border-zinc-750 hover:border-white bg-transparent hover:bg-white text-zinc-300 hover:text-zinc-900 font-semibold rounded-xl transition-all duration-200 text-sm flex items-center gap-2"
+                onClick={() => setIsAcknowledgmentModalOpen(true)}
+                className="px-4 py-2 border border-emerald-500/40 hover:border-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 font-semibold rounded-xl transition-all duration-200 text-sm flex items-center gap-2 shadow-sm"
               >
-                <Edit3 size={14} />
-                Edit Manifest & Ledger
+                <Download size={14} />
+                Download Acknowledgment
               </button>
-              <button
-                onClick={() => {
-                  if (hasWriteAccess) {
-                    handleDeleteOrder()
-                  } else {
-                    setShowAccessGateway(true)
-                  }
-                }}
-                className="px-4 py-2 border border-red-900/50 hover:border-red-500 bg-red-950/20 hover:bg-red-500 text-red-400 hover:text-white font-semibold rounded-xl transition-all duration-200 text-sm flex items-center gap-2"
-              >
-                <Trash2 size={14} />
-                Delete Order
-              </button>
-            </div>
-          )}
+            )}
+            {!isEditing && !previewCommit && (
+              <>
+                <button
+                  onClick={() => {
+                    if (hasWriteAccess) {
+                      handleStartEdit()
+                    } else {
+                      setShowAccessGateway(true)
+                    }
+                  }}
+                  className="px-4 py-2 border border-zinc-750 hover:border-white bg-transparent hover:bg-white text-zinc-300 hover:text-zinc-900 font-semibold rounded-xl transition-all duration-200 text-sm flex items-center gap-2"
+                >
+                  <Edit3 size={14} />
+                  Edit Manifest & Ledger
+                </button>
+                <button
+                  onClick={() => {
+                    if (hasWriteAccess) {
+                      handleDeleteOrder()
+                    } else {
+                      setShowAccessGateway(true)
+                    }
+                  }}
+                  className="px-4 py-2 border border-red-900/50 hover:border-red-500 bg-red-950/20 hover:bg-red-500 text-red-400 hover:text-white font-semibold rounded-xl transition-all duration-200 text-sm flex items-center gap-2"
+                >
+                  <Trash2 size={14} />
+                  Delete Order
+                </button>
+              </>
+            )}
+          </div>
           <div className="text-xs text-zinc-500 font-mono">
             Created: {formatDate(order.created_at)}
           </div>
@@ -2097,6 +2112,13 @@ export default function OrderDetailPage() {
       <AccessGatewayModal
         isOpen={showAccessGateway}
         onClose={() => setShowAccessGateway(false)}
+      />
+
+      {/* Download Acknowledgment Address Selection Modal */}
+      <DownloadAcknowledgmentModal
+        isOpen={isAcknowledgmentModalOpen}
+        onClose={() => setIsAcknowledgmentModalOpen(false)}
+        order={displayOrder}
       />
     </>
   )

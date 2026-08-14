@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import api, { getWithCache, isCached, invalidateCache, clearCache } from '../services/api'
-import { ChevronDown, ChevronLeft, ChevronRight, Filter, Search, Calendar, ArrowRight, MapPin, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Filter, Search, Calendar, ArrowRight, MapPin, Trash2, Download } from 'lucide-react'
+import { generateDeliveryAcknowledgment } from '../utils/pdfGenerator'
+import DownloadAcknowledgmentModal from './DownloadAcknowledgmentModal'
 import { formatDistanceToNow } from 'date-fns'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
@@ -30,6 +32,7 @@ export default function OrdersTable() {
   const [activeDeliveryEditOrderId, setActiveDeliveryEditOrderId] = useState(null)
   const [deliveryTimeInput, setDeliveryTimeInput] = useState('')
   const [submittingOrderId, setSubmittingOrderId] = useState(null)
+  const [acknowledgmentModalOrder, setAcknowledgmentModalOrder] = useState(null)
   const fetchRequestRef = useRef(0)
 
   useEffect(() => {
@@ -803,20 +806,34 @@ export default function OrdersTable() {
                       <div className="flex items-center gap-3">
                         {renderQRCode(order.id, order.order_status, stateCode, monthYear)}
                       </div>
-                      {hasWriteAccess && (
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation()
                             e.preventDefault()
-                            handleDeleteOrder(order.id, order.order_number)
+                            setAcknowledgmentModalOrder(order)
                           }}
-                          className="p-2 bg-red-950/30 text-red-500 hover:text-red-400 hover:bg-red-900/40 rounded-lg border border-red-900/40 hover:border-red-500/60 transition-all cursor-pointer z-30 flex items-center justify-center shadow-sm shrink-0"
-                          title="Delete Order"
+                          className="p-2 bg-emerald-950/30 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/40 rounded-lg border border-emerald-900/40 hover:border-emerald-500/60 transition-all cursor-pointer z-30 flex items-center justify-center shadow-sm shrink-0"
+                          title="Download Delivery Acknowledgment"
                         >
-                          <Trash2 size={15} />
+                          <Download size={15} />
                         </button>
-                      )}
+                        {hasWriteAccess && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              e.preventDefault()
+                              handleDeleteOrder(order.id, order.order_number)
+                            }}
+                            className="p-2 bg-red-950/30 text-red-500 hover:text-red-400 hover:bg-red-900/40 rounded-lg border border-red-900/40 hover:border-red-500/60 transition-all cursor-pointer z-30 flex items-center justify-center shadow-sm shrink-0"
+                            title="Delete Order"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Secure button / link banner */}
@@ -1001,6 +1018,13 @@ export default function OrdersTable() {
           </button>
         </div>
       )}
+
+      {/* Download Acknowledgment Address Modal */}
+      <DownloadAcknowledgmentModal
+        isOpen={!!acknowledgmentModalOrder}
+        onClose={() => setAcknowledgmentModalOrder(null)}
+        order={acknowledgmentModalOrder}
+      />
     </div>
   )
 }
