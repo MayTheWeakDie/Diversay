@@ -167,31 +167,46 @@ def get_global_analytics(
     # ═══════════════════════════════════════════════════
     product_qty = defaultdict(float)
     product_revenue = defaultdict(float)
+    product_orders = defaultdict(set)
     product_store_qty = defaultdict(lambda: defaultdict(float))
+    product_store_orders = defaultdict(lambda: defaultdict(set))
     product_category = {}
     product_brand = {}
 
     for od in order_data:
+        oid = od["order"].id
         for item in od["order"].line_items:
             pname = item.product.name if item.product else f"Product #{item.product_id}"
             price = item.unit_price or (item.product.unit_price if item.product else 0.0) or 0.0
             product_qty[pname] += item.quantity
             product_revenue[pname] += item.quantity * price
+            product_orders[pname].add(oid)
             product_store_qty[pname][od["source_store_name"]] += item.quantity
+            product_store_orders[pname][od["source_store_name"]].add(oid)
             if item.product:
                 product_category[pname] = item.product.category.value if item.product.category else "Other"
                 product_brand[pname] = (item.product.brand or "DSL").upper()
 
     top_products = sorted(product_qty.items(), key=lambda x: x[1], reverse=True)[:20]
+    
+    # Return all products with sales so frontend can sort by volume or order count dynamically
+    all_product_names = list(product_qty.keys())
     top_products_data = []
-    for pname, qty in top_products:
+    for pname in all_product_names:
+        qty = product_qty[pname]
+        order_count = len(product_orders[pname])
         store_breakdown = [
-            {"store": s, "quantity": q}
+            {
+                "store": s,
+                "quantity": q,
+                "orders": len(product_store_orders[pname].get(s, set()))
+            }
             for s, q in sorted(product_store_qty[pname].items(), key=lambda x: x[1], reverse=True)
         ]
         top_products_data.append({
             "product_name": pname,
             "total_quantity": qty,
+            "total_orders": order_count,
             "total_revenue": round(product_revenue.get(pname, 0), 2),
             "category": product_category.get(pname, "Other"),
             "brand": product_brand.get(pname, "DSL"),
@@ -202,26 +217,33 @@ def get_global_analytics(
     # 2. SEASONAL SALES PATTERNS (product × season)
     # ═══════════════════════════════════════════════════
     season_product_qty = defaultdict(lambda: defaultdict(float))
+    season_product_orders = defaultdict(lambda: defaultdict(set))
     month_product_qty = defaultdict(lambda: defaultdict(float))
 
     for od in order_data:
+        oid = od["order"].id
         for item in od["order"].line_items:
             pname = item.product.name if item.product else f"Product #{item.product_id}"
             season_product_qty[od["season"]][pname] += item.quantity
+            season_product_orders[od["season"]][pname].add(oid)
             month_name = calendar.month_abbr[od["month"]]
             month_product_qty[month_name][pname] += item.quantity
 
-    # For scatter/bubble chart: each bubble = (product, season, quantity)
+    # For scatter/bubble chart: each bubble = (product, season, quantity, orders)
     seasonal_scatter = []
-    top_product_names = [p[0] for p in top_products[:15]]
+    top_by_qty = sorted(product_qty.items(), key=lambda x: x[1], reverse=True)[:15]
+    top_by_orders = sorted(product_orders.items(), key=lambda x: len(x[1]), reverse=True)[:15]
+    top_product_names = list(dict.fromkeys([p[0] for p in top_by_qty] + [p[0] for p in top_by_orders]))[:15]
     for season in ["Rainy Season", "Harmattan", "Dry Season"]:
         for pname in top_product_names:
             qty = season_product_qty[season].get(pname, 0)
-            if qty > 0:
+            orders_cnt = len(season_product_orders[season].get(pname, set()))
+            if qty > 0 or orders_cnt > 0:
                 seasonal_scatter.append({
                     "product": pname,
                     "season": season,
-                    "quantity": qty
+                    "quantity": qty,
+                    "orders": orders_cnt
                 })
 
     # Monthly product breakdown for heatmap
@@ -261,34 +283,53 @@ def get_global_analytics(
     # 4. PRODUCTS BY GEOPOLITICAL ZONE
     # ═══════════════════════════════════════════════════
     zone_product_qty = defaultdict(lambda: defaultdict(float))
+    zone_product_orders = defaultdict(lambda: defaultdict(set))
     zone_order_count = defaultdict(int)
 
     for od in order_data:
         zone = od["zone"]
+        oid = od["order"].id
         zone_order_count[zone] += 1
         for item in od["order"].line_items:
             pname = item.product.name if item.product else f"Product #{item.product_id}"
             zone_product_qty[zone][pname] += item.quantity
+            zone_product_orders[zone][pname].add(oid)
 
     # Per zone: top products
     zone_data = []
     for zone in ["North West", "North East", "Middle Belt", "South West", "South East", "South South", "Other"]:
         if zone in zone_product_qty:
-            products_in_zone = sorted(zone_product_qty[zone].items(), key=lambda x: x[1], reverse=True)[:10]
+            all_prods = set(zone_product_qty[zone].keys()) | set(zone_product_orders[zone].keys())
+            prods = [
+                {
+                    "product": p,
+                    "quantity": zone_product_qty[zone].get(p, 0),
+                    "orders": len(zone_product_orders[zone].get(p, set()))
+                }
+                for p in all_prods
+            ]
             zone_data.append({
                 "zone": zone,
                 "total_orders": zone_order_count.get(zone, 0),
-                "total_quantity": sum(q for _, q in products_in_zone),
-                "products": [{"product": p, "quantity": q} for p, q in products_in_zone]
+                "total_quantity": sum(p["quantity"] for p in prods),
+                "products": prods
             })
 
-    # Stacked bar data: for each top product, show qty per zone
+    # Stacked bar data: for each top product, show qty and orders per zone
     zone_stacked_data = []
     zones_present = ["North West", "North East", "Middle Belt", "South West", "South East", "South South", "Other"]
     for pname in top_product_names[:10]:
-        entry = {"product": pname}
+        entry = {
+            "product": pname,
+            "zones_qty": {},
+            "zones_orders": {}
+        }
         for zone in zones_present:
-            entry[zone] = zone_product_qty[zone].get(pname, 0)
+            q = zone_product_qty[zone].get(pname, 0)
+            o_cnt = len(zone_product_orders[zone].get(pname, set()))
+            entry[zone] = q
+            entry["zones_qty"][zone] = q
+            entry["zones_orders"][zone] = o_cnt
         zone_stacked_data.append(entry)
 
     # ═══════════════════════════════════════════════════
@@ -460,19 +501,30 @@ def get_global_analytics(
     # 12. AVERAGE EXPENSE VALUE TREND (month over month)
     # ═══════════════════════════════════════════════════
     monthly_expense = defaultdict(float)
+    monthly_units_dispatched = defaultdict(float)
+
     for od in order_data:
-        monthly_expense[od["year_month"]] += od["expense"]
+        ym = od["year_month"]
+        monthly_expense[ym] += od["expense"]
+        units_in_order = sum(item.quantity for item in od["order"].line_items)
+        monthly_units_dispatched[ym] += units_in_order
 
     expense_value_trend = []
     for ym in sorted(monthly_orders.keys()):
         orders_cnt = monthly_orders[ym]
         tot_exp = monthly_expense[ym]
-        avg_exp = tot_exp / orders_cnt if orders_cnt > 0 else 0.0
+        tot_units = monthly_units_dispatched[ym]
+        avg_exp_order = tot_exp / orders_cnt if orders_cnt > 0 else 0.0
+        avg_exp_unit = tot_exp / tot_units if tot_units > 0 else 0.0
+
         expense_value_trend.append({
             "month": ym,
-            "avg_expense": round(avg_exp, 2),
+            "avg_expense": round(avg_exp_order, 2),
+            "avg_expense_per_order": round(avg_exp_order, 2),
+            "avg_expense_per_unit": round(avg_exp_unit, 2),
             "total_expense": round(tot_exp, 2),
-            "total_orders": orders_cnt
+            "total_orders": orders_cnt,
+            "total_units": round(tot_units, 2)
         })
 
     # ═══════════════════════════════════════════════════
@@ -543,4 +595,5 @@ def _empty_response(timeframe: str):
         "brand_data": [],
         "weekday_data": [],
         "order_value_trend": [],
+        "expense_value_trend": [],
     }

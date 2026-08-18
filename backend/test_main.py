@@ -159,3 +159,35 @@ def test_store_analytics_trending_by_range():
     assert "90" in data["top_products_by_range"]
     assert "all" in data["top_products_by_range"]
 
+
+def test_global_analytics_top_products_total_orders():
+    """Verify global analytics endpoint returns top_products with total_orders and total_quantity."""
+    headers = get_auth_headers()
+    response = client.get("/analytics/global", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert "top_products" in data
+    assert "summary" in data
+    for prod in data["top_products"]:
+        assert "product_name" in prod
+        assert "total_quantity" in prod
+        assert "total_orders" in prod
+        assert "store_breakdown" in prod
+
+
+def test_global_analytics_expense_value_trend_per_unit():
+    """Verify global analytics returns expense_value_trend with both per-order and per-unit metrics."""
+    headers = get_auth_headers()
+    response = client.get("/analytics/global", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert "expense_value_trend" in data
+    for item in data["expense_value_trend"]:
+        assert "month" in item
+        assert "avg_expense_per_order" in item
+        assert "avg_expense_per_unit" in item
+        assert "total_expense" in item
+        assert "total_orders" in item
+        assert "total_units" in item
+
+

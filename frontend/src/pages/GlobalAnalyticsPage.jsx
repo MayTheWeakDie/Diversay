@@ -104,24 +104,72 @@ const TIMEFRAME_OPTIONS = [
 
 // ── Reusable Components ─────────────────────────────
 
-const ChartCard = ({ title, subtitle, icon: Icon, children, className = '', span = '' }) => (
+const ChartCard = ({ title, subtitle, icon: Icon, action, children, className = '', span = '' }) => (
   <div className={`bg-zinc-900/80 backdrop-blur-sm border border-zinc-800/80 rounded-2xl overflow-hidden group hover:border-zinc-700 transition-all duration-300 hover:shadow-2xl ${span} ${className}`}>
-    <div className="px-5 py-4 border-b border-zinc-800/60 flex items-center gap-3">
-      {Icon && (
-        <div className="w-9 h-9 rounded-xl bg-zinc-800 border border-zinc-700/80 flex items-center justify-center text-white shrink-0 group-hover:scale-105 transition-transform">
-          <Icon size={18} />
+    <div className="px-5 py-4 border-b border-zinc-800/60 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
+        {Icon && (
+          <div className="w-9 h-9 rounded-xl bg-zinc-800 border border-zinc-700/80 flex items-center justify-center text-white shrink-0 group-hover:scale-105 transition-transform">
+            <Icon size={18} />
+          </div>
+        )}
+        <div>
+          <h3 className="text-sm font-bold text-white">{title}</h3>
+          {subtitle && <p className="text-[10px] text-zinc-500 font-medium mt-0.5">{subtitle}</p>}
         </div>
-      )}
-      <div>
-        <h3 className="text-sm font-bold text-white">{title}</h3>
-        {subtitle && <p className="text-[10px] text-zinc-500 font-medium mt-0.5">{subtitle}</p>}
       </div>
+      {action && (
+        <div className="shrink-0">{action}</div>
+      )}
     </div>
     <div className="p-5">
       {children}
     </div>
   </div>
 )
+
+const MetricToggle = ({ activeMetric, onChange, option1, option2 }) => {
+  const isSecond = activeMetric === option2.value
+
+  return (
+    <div className="relative bg-zinc-950/90 p-1 border border-zinc-800/90 rounded-xl flex items-center text-[11px] font-semibold select-none shadow-inner w-56 sm:w-64">
+      {/* Sliding active pill indicator */}
+      <div
+        className="absolute top-1 bottom-1 rounded-lg bg-zinc-800 border border-zinc-700/70 shadow-md transition-all duration-300 ease-out"
+        style={{
+          left: isSecond ? 'calc(50% + 2px)' : '4px',
+          width: 'calc(50% - 6px)',
+        }}
+      />
+
+      {/* Option 1 Button */}
+      <button
+        type="button"
+        onClick={() => onChange(option1.value)}
+        className={`relative z-10 flex-1 px-2.5 py-1 rounded-lg transition-colors duration-200 flex items-center justify-center gap-1.5 ${
+          !isSecond ? 'text-white font-bold' : 'text-zinc-400 hover:text-zinc-200'
+        }`}
+        title={option1.title}
+      >
+        <option1.icon size={13} className="shrink-0" />
+        <span className="truncate">{option1.label}</span>
+      </button>
+
+      {/* Option 2 Button */}
+      <button
+        type="button"
+        onClick={() => onChange(option2.value)}
+        className={`relative z-10 flex-1 px-2.5 py-1 rounded-lg transition-colors duration-200 flex items-center justify-center gap-1.5 ${
+          isSecond ? 'text-white font-bold' : 'text-zinc-400 hover:text-zinc-200'
+        }`}
+        title={option2.title}
+      >
+        <option2.icon size={13} className="shrink-0" />
+        <span className="truncate">{option2.label}</span>
+      </button>
+    </div>
+  )
+}
 
 const KPICard = ({ label, value, icon: Icon, prefix = '', suffix = '' }) => {
   return (
@@ -302,11 +350,17 @@ const CustomScatterTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
     const d = payload[0].payload
     return (
-      <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-xl shadow-2xl">
-        <p className="text-white font-bold text-xs mb-1">{d.product}</p>
-        <p className="text-xs font-semibold text-zinc-300">
-          {d.season}: <span className="text-white font-bold">{d.quantity.toLocaleString()} units</span>
-        </p>
+      <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-xl shadow-2xl space-y-1">
+        <p className="text-white font-bold text-xs border-b border-zinc-800 pb-1 mb-1">{d.product}</p>
+        <p className="text-[11px] font-semibold text-zinc-400 mb-1">{d.season}</p>
+        <div className="flex items-center justify-between gap-4 text-xs font-semibold">
+          <span className="text-zinc-400">Order Count:</span>
+          <span className="text-white font-bold">{(d.orders || 0).toLocaleString()} orders</span>
+        </div>
+        <div className="flex items-center justify-between gap-4 text-xs font-semibold">
+          <span className="text-zinc-400">Units Sold:</span>
+          <span className="text-emerald-400 font-bold">{(d.quantity || 0).toLocaleString()} units</span>
+        </div>
       </div>
     )
   }
@@ -328,6 +382,11 @@ export default function GlobalAnalyticsPage() {
   const [hoveredExpenseSlice, setHoveredExpenseSlice] = useState(null)
   const [selectedBrandModal, setSelectedBrandModal] = useState(null)
   const [brandSearchTerm, setBrandSearchTerm] = useState('')
+  const [topProductsMetric, setTopProductsMetric] = useState('quantity') // 'quantity' | 'orders'
+  const [seasonalMetric, setSeasonalMetric] = useState('quantity') // 'quantity' | 'orders'
+  const [zoneMetric, setZoneMetric] = useState('quantity') // 'quantity' | 'orders'
+  const [expenseTrendMetric, setExpenseTrendMetric] = useState('orders') // 'orders' | 'units'
+  const [zoneDetailsMetric, setZoneDetailsMetric] = useState('quantity') // 'quantity' | 'orders'
 
   useEffect(() => {
     setSearchParams({ timeframe })
@@ -356,13 +415,22 @@ export default function GlobalAnalyticsPage() {
   // ── Derived data for charts ──
   const topProductsChartData = useMemo(() => {
     if (!data?.top_products) return []
-    return data.top_products.slice(0, 15).map(p => ({
+
+    const sorted = [...data.top_products].sort((a, b) => {
+      if (topProductsMetric === 'orders') {
+        return (b.total_orders || 0) - (a.total_orders || 0) || (b.total_quantity || 0) - (a.total_quantity || 0)
+      }
+      return (b.total_quantity || 0) - (a.total_quantity || 0)
+    })
+
+    return sorted.slice(0, 15).map(p => ({
       name: truncate(p.product_name),
       fullName: p.product_name,
       quantity: p.total_quantity,
+      orders: p.total_orders || 0,
       revenue: p.total_revenue,
     })).reverse() // reverse for horizontal bar (bottom = highest)
-  }, [data])
+  }, [data, topProductsMetric])
 
   const monthlyVolumeData = useMemo(() => {
     if (!data?.monthly_volume) return []
@@ -376,29 +444,90 @@ export default function GlobalAnalyticsPage() {
     if (!data?.seasonal_scatter || data.seasonal_scatter.length === 0) return []
     const seasonY = { 'Rainy Season': 3, 'Harmattan': 2, 'Dry Season': 1 }
 
-    const quantities = data.seasonal_scatter.map(s => s.quantity)
-    const maxQty = Math.max(...quantities, 1)
-    const minQty = Math.min(...quantities, 0)
-    const range = maxQty - minQty || 1
+    // 1. Calculate baseline volume (units sold) for each product across all seasons
+    // Keeps X-axis product positions fixed so bubble size changes are immediately visible when toggling metric
+    const productVolumeTotals = {}
+    data.seasonal_scatter.forEach(s => {
+      const p = s.product
+      productVolumeTotals[p] = (productVolumeTotals[p] || 0) + (s.quantity || 0)
+    })
 
-    return data.seasonal_scatter.map(s => {
-      const normalized = (s.quantity - minQty) / range
+    // 2. Sort product names descending by baseline volume (units sold)
+    const sortedProductNames = Object.keys(productVolumeTotals).sort((a, b) => productVolumeTotals[b] - productVolumeTotals[a])
+
+    // Map each product to its fixed baseline rank index
+    const productRank = {}
+    sortedProductNames.forEach((p, idx) => {
+      productRank[p] = idx
+    })
+
+    // 3. Sort scatter items by the fixed baseline product rank
+    const sortedScatter = [...data.seasonal_scatter].sort((a, b) => {
+      const rankDiff = (productRank[a.product] ?? 999) - (productRank[b.product] ?? 999)
+      if (rankDiff !== 0) return rankDiff
+      return seasonY[b.season] - seasonY[a.season]
+    })
+
+    const values = sortedScatter.map(s => seasonalMetric === 'orders' ? (s.orders || 0) : s.quantity)
+    const maxVal = Math.max(...values, 1)
+    const minVal = Math.min(...values, 0)
+    const range = maxVal - minVal || 1
+
+    return sortedScatter.map(s => {
+      const val = seasonalMetric === 'orders' ? (s.orders || 0) : s.quantity
+      const normalized = (val - minVal) / range
       const opacity = Math.max(0.38, Math.min(0.92, 0.38 + normalized * 0.54))
 
       return {
         ...s,
+        orders: s.orders || 0,
         productShort: truncate(s.product, 14),
         seasonY: seasonY[s.season] || 0,
         fill: SEASON_COLORS[s.season] || '#10b981',
         opacity: Number(opacity.toFixed(2)),
       }
     })
-  }, [data])
+  }, [data, seasonalMetric])
 
   const uniqueSeasonalProducts = useMemo(() => {
     if (!data?.seasonal_scatter) return []
     return Array.from(new Set(data.seasonal_scatter.map(s => s.product)))
   }, [data])
+
+  const zoneStackedChartData = useMemo(() => {
+    if (!data?.zone_stacked) return []
+
+    return data.zone_stacked.map(d => {
+      const entry = {
+        product: truncate(d.product || '', 16),
+        fullName: d.product,
+        zones_qty: d.zones_qty || {},
+        zones_orders: d.zones_orders || {},
+      }
+
+      const sourceMap = zoneMetric === 'orders' ? (d.zones_orders || {}) : (d.zones_qty || d)
+      Object.keys(ZONE_COLORS).forEach(z => {
+        entry[z] = sourceMap[z] || 0
+      })
+
+      return entry
+    })
+  }, [data, zoneMetric])
+
+  const expenseTrendChartData = useMemo(() => {
+    const raw = data?.expense_value_trend || data?.order_value_trend || []
+    return raw.map(d => {
+      const avgExpOrder = d.avg_expense_per_order ?? d.avg_expense ?? 0
+      const avgExpUnit = d.avg_expense_per_unit ?? (d.total_units > 0 ? d.total_expense / d.total_units : 0)
+      const val = expenseTrendMetric === 'units' ? avgExpUnit : avgExpOrder
+
+      return {
+        ...d,
+        val: Number(val.toFixed(2)),
+        displayMetric: expenseTrendMetric === 'units' ? 'Per Unit' : 'Per Order'
+      }
+    })
+  }, [data, expenseTrendMetric])
 
   const activeExpenseItem = useMemo(() => {
     if (!data?.expense_breakdown || data.expense_breakdown.length === 0) return null
@@ -520,8 +649,20 @@ export default function GlobalAnalyticsPage() {
       {/* ═══════════════════════════════════════════ */}
       <ChartCard
         title="Top Selling Products"
-        subtitle="Products ranked by total units sold across all stores"
+        subtitle={
+          topProductsMetric === 'orders'
+            ? "Products ranked by total individual orders across all stores"
+            : "Products ranked by total units sold across all stores"
+        }
         icon={TrendingUp}
+        action={
+          <MetricToggle
+            activeMetric={topProductsMetric}
+            onChange={setTopProductsMetric}
+            option1={{ value: 'quantity', label: 'Units Sold', icon: Package, title: 'Rank products by total volume / pieces sold' }}
+            option2={{ value: 'orders', label: 'Individual Orders', icon: ShoppingCart, title: 'Rank products by count of individual orders' }}
+          />
+        }
       >
         {topProductsChartData.length > 0 ? (
           <div style={{ height: Math.max(400, topProductsChartData.length * 34) }}>
@@ -535,15 +676,19 @@ export default function GlobalAnalyticsPage() {
                 <XAxis type="number" tick={{ fill: '#71717a', fontSize: 11 }} tickFormatter={(v) => v.toLocaleString()} />
                 <YAxis type="category" dataKey="name" width={140} tick={{ fill: '#a1a1aa', fontSize: 11, fontWeight: 600 }} />
                 <Bar
-                  dataKey="quantity"
-                  name="Quantity Sold"
+                  dataKey={topProductsMetric}
+                  name={topProductsMetric === 'orders' ? "Individual Orders" : "Quantity Sold"}
                   radius={[0, 6, 6, 0]}
                   maxBarSize={22}
-                  isAnimationActive={false}
+                  isAnimationActive={true}
+                  animationDuration={750}
+                  animationEasing="ease-in-out"
                 >
                   {topProductsChartData.map((entry, i) => {
-                    const sortedByQty = [...topProductsChartData].sort((a, b) => b.quantity - a.quantity)
-                    const rank = sortedByQty.findIndex(item => item.fullName === entry.fullName)
+                    const sortedByMetric = [...topProductsChartData].sort((a, b) =>
+                      topProductsMetric === 'orders' ? b.orders - a.orders : b.quantity - a.quantity
+                    )
+                    const rank = sortedByMetric.findIndex(item => item.fullName === entry.fullName)
                     const monoProductShades = ['#e4e4e7', '#d4d4d8', '#a1a1aa', '#8a8a93', '#71717a', '#5f5f67', '#52525b', '#3f3f46', '#27272a']
                     const color = monoProductShades[Math.min(rank, monoProductShades.length - 1)]
                     return (
@@ -560,8 +705,12 @@ export default function GlobalAnalyticsPage() {
                           const titleEl = tooltip.querySelector('.tt-title')
                           const qtyEl = tooltip.querySelector('.tt-qty')
                           if (titleEl) titleEl.textContent = entry.fullName
-                          if (qtyEl) qtyEl.textContent = `Quantity Sold: ${entry.quantity.toLocaleString()}`
-                          const left = Math.min(rect.right + 12, window.innerWidth - 220)
+                          if (qtyEl) {
+                            qtyEl.textContent = topProductsMetric === 'orders'
+                              ? `Individual Orders: ${entry.orders.toLocaleString()} (${entry.quantity.toLocaleString()} units)`
+                              : `Quantity Sold: ${entry.quantity.toLocaleString()} (${entry.orders.toLocaleString()} orders)`
+                          }
+                          const left = Math.min(rect.right + 12, window.innerWidth - 240)
                           const top = rect.top + rect.height / 2 - 24
                           tooltip.style.left = `${left}px`
                           tooltip.style.top = `${top}px`
@@ -593,8 +742,20 @@ export default function GlobalAnalyticsPage() {
       {/* ═══════════════════════════════════════════ */}
       <ChartCard
         title="Seasonal Sales Patterns"
-        subtitle="Product sales volume across Nigerian seasons — bubble size = quantity"
+        subtitle={
+          seasonalMetric === 'orders'
+            ? "Product order frequency across Nigerian seasons — bubble size = order count"
+            : "Product sales volume across Nigerian seasons — bubble size = units sold"
+        }
         icon={CloudRain}
+        action={
+          <MetricToggle
+            activeMetric={seasonalMetric}
+            onChange={setSeasonalMetric}
+            option1={{ value: 'quantity', label: 'Units Sold', icon: Package, title: 'Scale bubbles by volume / pieces sold' }}
+            option2={{ value: 'orders', label: 'Order Frequency', icon: ShoppingCart, title: 'Scale bubbles by count of individual orders' }}
+          />
+        }
       >
         {seasonalBubbles.length > 0 ? (
           <div>
@@ -634,9 +795,14 @@ export default function GlobalAnalyticsPage() {
                     tickFormatter={(v) => ({ 1: 'Dry', 2: 'Harmattan', 3: 'Rainy' }[v] || '')}
                     tick={{ fill: '#a1a1aa', fontSize: 11, fontWeight: 600 }}
                   />
-                  <ZAxis type="number" dataKey="quantity" range={[80, 800]} name="Quantity" />
+                  <ZAxis type="number" dataKey={seasonalMetric} range={[80, 800]} name={seasonalMetric === 'orders' ? "Order Count" : "Quantity"} />
                   <Tooltip content={<CustomScatterTooltip />} />
-                  <Scatter data={seasonalBubbles} isAnimationActive={true}>
+                  <Scatter
+                    data={seasonalBubbles}
+                    isAnimationActive={true}
+                    animationDuration={750}
+                    animationEasing="ease-in-out"
+                  >
                     {seasonalBubbles.map((entry, idx) => (
                       <Cell
                         key={idx}
@@ -702,11 +868,23 @@ export default function GlobalAnalyticsPage() {
       {/* 4. PRODUCTS BY GEOPOLITICAL ZONE — Stacked */}
       {/* ═══════════════════════════════════════════ */}
       <ChartCard
-        title="Products Sold by Geopolitical Zone"
-        subtitle="Top products broken down by customer region"
+        title={zoneMetric === 'orders' ? "Product Orders by Geopolitical Zone" : "Products Sold by Geopolitical Zone"}
+        subtitle={
+          zoneMetric === 'orders'
+            ? "Top product order frequency broken down by customer region"
+            : "Top product units sold broken down by customer region"
+        }
         icon={Globe}
+        action={
+          <MetricToggle
+            activeMetric={zoneMetric}
+            onChange={setZoneMetric}
+            option1={{ value: 'quantity', label: 'Units Sold', icon: Package, title: 'Break down product volume by geopolitical zone' }}
+            option2={{ value: 'orders', label: 'Order Frequency', icon: ShoppingCart, title: 'Break down order count by geopolitical zone' }}
+          />
+        }
       >
-        {data.zone_stacked && data.zone_stacked.length > 0 ? (
+        {zoneStackedChartData && zoneStackedChartData.length > 0 ? (
           <div>
             {/* Zone Legend */}
             <div className="flex flex-wrap gap-3 mb-4">
@@ -717,16 +895,16 @@ export default function GlobalAnalyticsPage() {
                 </div>
               ))}
             </div>
-            <div style={{ height: Math.max(350, data.zone_stacked.length * 40) }}>
+            <div style={{ height: Math.max(350, zoneStackedChartData.length * 40) }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
-                  data={data.zone_stacked.map(d => ({ ...d, product: truncate(d.product, 16) }))}
+                  data={zoneStackedChartData}
                   layout="vertical"
                   margin={{ left: 10, right: 20, top: 5, bottom: 5 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#27272a" horizontal={false} />
                   <XAxis type="number" tick={{ fill: '#71717a', fontSize: 11 }} tickFormatter={(v) => v.toLocaleString()} />
-                  <YAxis type="category" dataKey="product" width={130} tick={<CustomYAxisTick fullData={data.zone_stacked} />} />
+                  <YAxis type="category" dataKey="product" width={130} tick={<CustomYAxisTick fullData={zoneStackedChartData} />} />
                   {Object.entries(ZONE_COLORS).map(([zone, color]) => (
                     <Bar
                       key={zone}
@@ -736,7 +914,9 @@ export default function GlobalAnalyticsPage() {
                       fill={color}
                       shape={<StackedBarSegment />}
                       maxBarSize={22}
-                      isAnimationActive={false}
+                      isAnimationActive={true}
+                      animationDuration={750}
+                      animationEasing="ease-in-out"
                     />
                   ))}
                 </BarChart>
@@ -1115,33 +1295,52 @@ export default function GlobalAnalyticsPage() {
         {/* ═══════════════════════════════════════════ */}
         <ChartCard
           title="Average Expense Value Trend"
-          subtitle="How the average logistics expense per order changes month over month"
+          subtitle={
+            expenseTrendMetric === 'units'
+              ? "How the average logistics expense per unit dispatched changes month over month"
+              : "How the average logistics expense per order changes month over month"
+          }
           icon={TrendingUp}
+          action={
+            <MetricToggle
+              activeMetric={expenseTrendMetric}
+              onChange={setExpenseTrendMetric}
+              option1={{ value: 'orders', label: 'Per Order', icon: ShoppingCart, title: 'Average logistics expense calculated per order dispatched' }}
+              option2={{ value: 'units', label: 'Per Unit', icon: Package, title: 'Average logistics expense calculated per unit/piece dispatched' }}
+            />
+          }
         >
-          {(data.expense_value_trend || data.order_value_trend) && (data.expense_value_trend || data.order_value_trend).length > 0 ? (
+          {expenseTrendChartData && expenseTrendChartData.length > 0 ? (
             <div style={{ height: 320 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={data.expense_value_trend || data.order_value_trend} margin={{ top: 10, right: 30, left: 10, bottom: 0 }}>
+                <LineChart data={expenseTrendChartData} margin={{ top: 10, right: 30, left: 10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
                   <XAxis dataKey="month" tick={{ fill: '#e4e4e7', fontSize: 11, fontWeight: 700 }} />
                   <YAxis tick={{ fill: '#71717a', fontSize: 11 }} tickFormatter={(v) => `₦${v >= 1000 ? (v/1000).toFixed(0) + 'k' : v}`} />
                   <Tooltip
                     content={({ active, payload, label }) => {
                       if (active && payload && payload.length) {
+                        const item = payload[0].payload
                         return (
-                          <div className="bg-zinc-900/95 border border-zinc-700/90 p-3.5 rounded-xl shadow-2xl backdrop-blur-md">
-                            <p className="text-white font-bold text-xs mb-1 uppercase tracking-wide border-b border-zinc-800 pb-1">{label}</p>
-                            <p className="text-white font-black text-xs mt-1">
-                              Avg Expense: ₦{payload[0].value.toLocaleString()}
+                          <div className="bg-zinc-900/95 border border-zinc-700/90 p-3.5 rounded-xl shadow-2xl backdrop-blur-md space-y-1">
+                            <p className="text-white font-bold text-xs uppercase tracking-wide border-b border-zinc-800 pb-1">{label}</p>
+                            <p className="text-white font-black text-xs pt-0.5">
+                              {expenseTrendMetric === 'units' ? 'Avg Expense / Unit' : 'Avg Expense / Order'}: ₦{payload[0].value.toLocaleString()}
                             </p>
-                            {payload[0].payload.total_expense != null && (
-                              <p className="text-zinc-400 text-[11px] mt-0.5">
-                                Total Expense: ₦{payload[0].payload.total_expense.toLocaleString()}
+                            {item.total_expense != null && (
+                              <p className="text-zinc-400 text-[11px]">
+                                Total Expense: ₦{item.total_expense.toLocaleString()}
                               </p>
                             )}
-                            <p className="text-zinc-500 text-[10px] mt-0.5">
-                              {payload[0].payload.total_orders} orders dispatched
-                            </p>
+                            <div className="text-zinc-500 text-[10px] flex items-center gap-1.5 pt-0.5">
+                              <span>{item.total_orders} orders</span>
+                              {item.total_units != null && (
+                                <>
+                                  <span>•</span>
+                                  <span>{item.total_units.toLocaleString()} units</span>
+                                </>
+                              )}
+                            </div>
                           </div>
                         )
                       }
@@ -1150,12 +1349,15 @@ export default function GlobalAnalyticsPage() {
                   />
                   <Line
                     type="monotone"
-                    dataKey="avg_expense"
-                    name="Avg Expense"
+                    dataKey="val"
+                    name={expenseTrendMetric === 'units' ? "Avg Expense / Unit" : "Avg Expense / Order"}
                     stroke="#ffffff"
                     strokeWidth={2.5}
                     dot={{ fill: '#ffffff', r: 4, stroke: '#18181b', strokeWidth: 1.5 }}
                     activeDot={{ r: 6, stroke: '#ffffff', strokeWidth: 2, fill: '#ffffff' }}
+                    isAnimationActive={true}
+                    animationDuration={750}
+                    animationEasing="ease-in-out"
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -1167,17 +1369,46 @@ export default function GlobalAnalyticsPage() {
       </div>
 
       {/* ═══════════════════════════════════════════ */}
-      {/* ZONE DETAILS TABLE                         */}
+      {/* ZONE DETAILS TABLE / CARDS                 */}
       {/* ═══════════════════════════════════════════ */}
       <ChartCard
         title="Geopolitical Zone Details"
-        subtitle="Orders and top products per zone with volume indicators"
+        subtitle={
+          zoneDetailsMetric === 'orders'
+            ? "Orders and top products per zone by order frequency"
+            : "Orders and top products per zone with volume indicators"
+        }
         icon={Globe}
+        action={
+          <MetricToggle
+            activeMetric={zoneDetailsMetric}
+            onChange={setZoneDetailsMetric}
+            option1={{ value: 'quantity', label: 'Units Sold', icon: Package, title: 'Rank regional top products by total volume / units sold' }}
+            option2={{ value: 'orders', label: 'Order Frequency', icon: ShoppingCart, title: 'Rank regional top products by count of individual orders' }}
+          />
+        }
       >
         {data.zone_data && data.zone_data.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {data.zone_data.map((z, idx) => {
               const color = ZONE_COLORS[z.zone] || '#71717a'
+
+              // Sort products in this zone based on active zoneDetailsMetric
+              const sortedProducts = [...z.products].sort((a, b) => {
+                if (zoneDetailsMetric === 'orders') {
+                  const oDiff = (b.orders || 0) - (a.orders || 0)
+                  if (oDiff !== 0) return oDiff
+                  return (b.quantity || 0) - (a.quantity || 0)
+                } else {
+                  const qDiff = (b.quantity || 0) - (a.quantity || 0)
+                  if (qDiff !== 0) return qDiff
+                  return (b.orders || 0) - (a.orders || 0)
+                }
+              })
+
+              const topItem = sortedProducts[0]
+              const maxVal = zoneDetailsMetric === 'orders' ? (topItem?.orders || 1) : (topItem?.quantity || 1)
+
               return (
                 <div
                   key={idx}
@@ -1201,18 +1432,22 @@ export default function GlobalAnalyticsPage() {
                     </div>
 
                     {/* Top Products Label */}
-                    <p className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider mb-2.5">Top Products Volume</p>
+                    <p className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider mb-2.5">
+                      {zoneDetailsMetric === 'orders' ? 'Top Products Order Frequency' : 'Top Products Volume'}
+                    </p>
 
                     {/* Top Products Progress Bar List */}
                     <div className="space-y-2.5">
-                      {z.products.slice(0, 5).map((p, pidx) => {
-                        const maxQty = z.products[0]?.quantity || 1
-                        const barPct = (p.quantity / maxQty) * 100
+                      {sortedProducts.slice(0, 5).map((p, pidx) => {
+                        const val = zoneDetailsMetric === 'orders' ? (p.orders || 0) : (p.quantity || 0)
+                        const barPct = Math.min(100, Math.max(4, (val / maxVal) * 100))
+                        const valLabel = zoneDetailsMetric === 'orders' ? `${val.toLocaleString()} orders` : val.toLocaleString()
+
                         return (
                           <div key={pidx} className="space-y-1">
                             <div className="flex justify-between items-center text-xs">
                               <span className="text-zinc-300 font-medium truncate max-w-[70%] group-hover:text-zinc-200">{p.product}</span>
-                              <span className="text-white font-extrabold text-[11px]">{p.quantity.toLocaleString()}</span>
+                              <span className="text-white font-extrabold text-[11px]">{valLabel}</span>
                             </div>
                             <div className="w-full h-1 bg-zinc-950 rounded-full overflow-hidden">
                               <div
