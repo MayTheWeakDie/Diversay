@@ -48,7 +48,7 @@ export default function TopBar({ hideGreeting = false, onMenuToggle }) {
   }
 
   const rawName = user?.full_name && user.full_name !== 'LogX Engine' && user.full_name !== 'LogX' ? user.full_name : 'Grace'
-  const userName = rawName.split(' ')[0]
+  const userName = rawName
   const fullGreeting = `${greeting}, ${userName}`
 
   return (

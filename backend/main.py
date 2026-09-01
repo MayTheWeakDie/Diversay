@@ -26,7 +26,7 @@ def seed_admin_user():
             {
                 "email": os.getenv("ADMIN2_EMAIL", "seunayorinde@gmail.com"),
                 "name": "Mr. Seun",
-                "password": os.getenv("ADMIN2_PASSWORD", "seunayorinder@2025")
+                "password": os.getenv("ADMIN2_PASSWORD", "seunayorinde@2025")
             }
         ]
         

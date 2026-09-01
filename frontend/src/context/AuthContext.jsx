@@ -147,7 +147,16 @@ export function AuthProvider({ children }) {
 
       return { success: true, user: userData }
     } catch (error) {
-      return { success: false, error: error.response?.data?.detail || 'Invalid email or password' }
+      const detail = error.response?.data?.detail
+      let errMsg = 'Invalid email or password'
+      if (typeof detail === 'string') {
+        errMsg = detail
+      } else if (Array.isArray(detail)) {
+        errMsg = detail.map(e => e.msg || e).join(', ')
+      } else if (error.message) {
+        errMsg = error.message
+      }
+      return { success: false, error: errMsg }
     }
   }
 
@@ -156,7 +165,16 @@ export function AuthProvider({ children }) {
       const response = await api.post('/auth/signup', { email, password, full_name })
       return { success: true, user: response.data.user }
     } catch (error) {
-      return { success: false, error: error.response?.data?.detail || 'Signup failed' }
+      const detail = error.response?.data?.detail
+      let errMsg = 'Signup failed'
+      if (typeof detail === 'string') {
+        errMsg = detail
+      } else if (Array.isArray(detail)) {
+        errMsg = detail.map(e => e.msg || e).join(', ')
+      } else if (error.message) {
+        errMsg = error.message
+      }
+      return { success: false, error: errMsg }
     }
   }
 

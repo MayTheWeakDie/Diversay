@@ -51,7 +51,7 @@ def signup(user_create: UserCreate, db: Session = Depends(get_db)):
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered"
+            detail="Email already registered. Please log in instead."
         )
     
     new_user = User(

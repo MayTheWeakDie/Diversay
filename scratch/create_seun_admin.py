@@ -13,7 +13,7 @@ def create_admin():
     try:
         email = "seunayorinde@gmail.com"
         name = "Mr. Seun"
-        raw_password = "seunayorinder@2025"
+        raw_password = "seunayorinde@2025"
 
         user = db.query(User).filter(User.email == email).first()
         if not user:

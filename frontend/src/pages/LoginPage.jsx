@@ -79,7 +79,7 @@ export default function LoginPage() {
         }
       }
     } catch (err) {
-      setError('Invalid email or password')
+      setError(err.response?.data?.detail || err.message || 'An unexpected error occurred')
     } finally {
       setIsLoading(false)
     }

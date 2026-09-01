@@ -86,9 +86,9 @@ export default function DashboardWelcome({ userName, onComplete, onLeave }) {
   useEffect(() => { completeRef.current = onComplete }, [onComplete])
   useEffect(() => { leaveRef.current = onLeave }, [onLeave])
 
-  const firstName = userName?.split(' ')[0] || 'Admin'
+  const displayName = userName || 'Admin'
   const { greeting, quip } = greetingRef.current
-  const greetingPart = `${greeting}, ${firstName}`
+  const greetingPart = `${greeting}, ${displayName}`
   const quipPart = `, ${quip}`
   const fullText = `${greetingPart}${quipPart}`
 
