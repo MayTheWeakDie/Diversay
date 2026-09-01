@@ -4,6 +4,7 @@ import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import AccessGrantedPopup from './AccessGrantedPopup'
 import AccessRevokedPopup from './AccessRevokedPopup'
+import AIChatWidget from './AIChatWidget'
 
 export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -30,6 +31,9 @@ export default function DashboardLayout() {
       {/* Global popup for access notifications */}
       <AccessGrantedPopup />
       <AccessRevokedPopup />
+
+      {/* Floating AI Chat Widget */}
+      <AIChatWidget />
     </div>
   )
 }

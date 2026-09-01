@@ -191,3 +191,112 @@ def test_global_analytics_expense_value_trend_per_unit():
         assert "total_units" in item
 
 
+# ---------------------------------------------------------------------------
+# AI assistant (/ai/ask) — slot-filling router.
+# We monkeypatch the two Gemini wrappers (select_tool / narrate) so these run
+# offline and deterministically; the deterministic executors run for real.
+# ---------------------------------------------------------------------------
+import routes.ai as ai_module
+from datetime import datetime, timedelta
+from models import Customer, Order
+
+
+def _seed_delayed_order(order_number="DSL-TEST-0001"):
+    """Seed one non-transfer order dispatched 10 days ago with no delivery.
+
+    With the 48h SLA it is DELAYED live, even though the stored order_status
+    column stays at its DRAFT default — which is exactly what we assert.
+    """
+    db = TestingSessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "test@example.com").first()
+        customer = db.query(Customer).filter(Customer.name == "AI Test Customer").first()
+        if not customer:
+            customer = Customer(
+                name="AI Test Customer", city="Jos", state="Plateau",
+                contact_number="08030000000", email="aitest@example.com",
+            )
+            db.add(customer)
+            db.commit()
+            db.refresh(customer)
+        order = db.query(Order).filter(Order.order_number == order_number).first()
+        if not order:
+            order = Order(
+                order_number=order_number,
+                customer_id=customer.id,
+                created_by_id=user.id,
+                dispatch_time=datetime.utcnow() - timedelta(days=10),
+                driver_name="Akeem",
+                vehicle_number="APP-483-EQ",
+            )
+            db.add(order)
+            db.commit()
+    finally:
+        db.close()
+
+
+def test_ai_requires_auth():
+    """/ai/ask must reject unauthenticated requests."""
+    resp = client.post("/ai/ask", json={"question": "How many orders?"})
+    assert resp.status_code == 401
+
+
+def test_ai_analytics_routes_to_query_analytics(monkeypatch):
+    """Analytics questions run the deterministic executor and return a chart."""
+    _seed_delayed_order("DSL-TEST-0001")
+    monkeypatch.setattr(
+        ai_module, "select_tool",
+        lambda q: {"name": "query_analytics", "args": {"metric": "order_count", "group_by": "status"}},
+    )
+    monkeypatch.setattr(ai_module, "narrate", lambda question, tool, result: "There is 1 delayed order.")
+
+    resp = client.post("/ai/ask", headers=get_auth_headers(), json={"question": "How many orders by status?"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tool_used"] == "query_analytics"
+    assert data["answerable"] is True
+    assert data["chart"] is not None
+    assert data["chart"]["chart_type"] == "donut"
+    # The seeded order surfaces under its LIVE status, not the stored default.
+    assert "Delayed" in [d["label"] for d in data["chart"]["data"]]
+    assert data["answer"] == "There is 1 delayed order."
+
+
+def test_ai_get_order_returns_live_status(monkeypatch):
+    """get_order reports the freshly-computed status, not the stale column."""
+    _seed_delayed_order("DSL-TEST-0002")
+    monkeypatch.setattr(
+        ai_module, "select_tool",
+        lambda q: {"name": "get_order", "args": {"order_number": "DSL-TEST-0002"}},
+    )
+    monkeypatch.setattr(ai_module, "narrate", lambda question, tool, result: "stub")
+
+    resp = client.post("/ai/ask", headers=get_auth_headers(), json={"question": "status of DSL-TEST-0002?"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tool_used"] == "get_order"
+    assert data["answerable"] is True
+    assert data["data"][0]["order_number"] == "DSL-TEST-0002"
+    assert data["data"][0]["status"] == "Delayed"  # live-computed
+
+
+def test_ai_cannot_answer_refuses(monkeypatch):
+    """Off-topic questions refuse without fabricating (and never narrate)."""
+    def boom(*a, **k):
+        raise AssertionError("narrate must not be called on cannot_answer")
+
+    monkeypatch.setattr(
+        ai_module, "select_tool",
+        lambda q: {"name": "cannot_answer", "args": {"reason": "off-topic"}},
+    )
+    monkeypatch.setattr(ai_module, "narrate", boom)
+
+    resp = client.post("/ai/ask", headers=get_auth_headers(), json={"question": "What's the weather in Lagos?"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["answerable"] is False
+    assert data["tool_used"] == "cannot_answer"
+    assert data["chart"] is None
+
+
+

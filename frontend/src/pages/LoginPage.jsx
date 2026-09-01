@@ -4,13 +4,6 @@ import { useAuth } from '../hooks/useAuth'
 import { Shield, User, Eye, EyeOff, UserPlus, ArrowRight } from 'lucide-react'
 import SplashPage from './SplashPage'
 
-const FULL_TEXT = "Ready to start working? sign in here"
-
-const COLORS = [
-  { hex: '#FE0100' },  // Diversay Red — exact brand match
-  { hex: '#CD9933' },  // Diversay Gold — exact brand match
-]
-
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -30,123 +23,26 @@ export default function LoginPage() {
   const [showSplash, setShowSplash] = useState(!skipSplash)
   const [slideLoginUp, setSlideLoginUp] = useState(skipSplash)
 
-  // 3 groups: 0 = "Ready to start", 1 = "working?", 2 = "sign in here"
-  const GROUPS = [
-    [0, 1, 2],       // "Ready to start"
-    [3],             // "working?"
-    [4, 5, 6],       // "sign in here"
-  ]
-
-  // All fonts share the SAME size so the heading never shifts/reflows
-  const FONTS = [
-    { family: '"Playfair Display", Georgia, serif', style: 'italic', weight: 700 },
-    { family: '"Merriweather", Georgia, serif', style: 'normal', weight: 700 },
-    { family: '"Lora", Georgia, serif', style: 'italic', weight: 700 },
-    { family: '"Libre Baskerville", Georgia, serif', style: 'normal', weight: 700 },
-    { family: '"PT Serif", Georgia, serif', style: 'italic', weight: 700 },
-  ]
-
-  // groupFonts[g] = current font index for group g
-  const [groupFonts, setGroupFonts] = useState(() => [
-    Math.floor(Math.random() * FONTS.length),
-    Math.floor(Math.random() * FONTS.length),
-    Math.floor(Math.random() * FONTS.length),
-  ])
-  const [activeColorIdx, setActiveColorIdx] = useState(0)
-
-  // Wave animation effect: Group 0 -> Group 1 -> Group 2 -> Group 1 -> repeat
   useEffect(() => {
     if (showSplash) {
       setSearchParams({})
     }
-    const sequence = [0, 1, 2, 1]
-    let stepIndex = 0
-
-    const timer = setInterval(() => {
-      const activeGroup = sequence[stepIndex]
-      setGroupFonts(prev => {
-        const next = [...prev]
-        const currentFont = prev[activeGroup] ?? 0
-        let pick
-        do {
-          pick = Math.floor(Math.random() * FONTS.length)
-        } while (pick === currentFont)
-        next[activeGroup] = pick
-        return next
-      })
-
-      if (activeGroup === 2) {
-        setActiveColorIdx(prev => {
-          let pickColor
-          do {
-            pickColor = Math.floor(Math.random() * COLORS.length)
-          } while (pickColor === prev)
-          return pickColor
-        })
-      }
-
-      stepIndex = (stepIndex + 1) % sequence.length
-    }, 180) // Fast, snappy wave step time
-
     setIsReady(true)
-    return () => clearInterval(timer)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Map a word index to its group's current font
-  const fontForWord = (wordIdx) => {
-    const g = GROUPS.findIndex(grp => grp.includes(wordIdx))
-    return FONTS[groupFonts[g] ?? 0]
-  }
-
-  const WORDS = FULL_TEXT.split(' ')
 
   const renderHeading = () => {
     if (!isReady) return null
 
-    // Determine the active color from the state variable
-    const activeColor = COLORS[activeColorIdx]
-
-    const renderWord = (word, wordIdx, isLast) => {
-      const isBlue = wordIdx >= 4          // "sign in here"
-      const font = fontForWord(wordIdx)
-
-      return (
-        <span
-          key={wordIdx}
-          className="transition-all duration-100"
-          style={{
-            fontFamily: font.family,
-            fontStyle: font.style,
-            fontWeight: font.weight,
-            color: isBlue ? activeColor.hex : '#ffffff',
-          }}
-        >
-          {word}{!isLast && ' '}
-        </span>
-      )
-    }
-
-    // Line 1: "Ready to start"  |  Line 2: "working? sign in here"
-    const line1 = WORDS.slice(0, 3)
-    const line2 = WORDS.slice(3)
-
     return (
-      <>
-        <span className="inline-block">{line1.map((w, i) => renderWord(w, i, i === line1.length - 1))}</span>
+      <span className="text-white" style={{ fontFamily: '"Playfair Display", Georgia, serif', fontWeight: 700, fontStyle: 'normal' }}>
+        <span className="inline-block">
+          Ready to start
+        </span>
         <br />
         <span className="inline-block whitespace-nowrap">
-          {renderWord(line2[0], 3, false)}
-          <span className="relative inline-block pb-3">
-            {line2.slice(1).map((w, i) => renderWord(w, 4 + i, i === line2.length - 2))}
-            <span className="absolute left-0 bottom-[-2px] w-full h-[12px] pointer-events-none overflow-visible">
-              <svg viewBox="0 0 100 12" preserveAspectRatio="none" className="w-full h-full fill-none transition-all duration-300" stroke={activeColor.hex} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M 2,6 C 15,1 25,11 38,3 C 50,13 62,1 75,9 C 85,3 92,11 98,5" />
-                <path d="M 4,9 C 16,4 28,13 42,6 C 52,13 65,4 78,11 C 86,7 93,12 97,8" opacity="0.8" />
-              </svg>
-            </span>
-          </span>
+          working? sign in here
         </span>
-      </>
+      </span>
     )
   }
 

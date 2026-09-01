@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
     SUPABASE_URL: str | None = None
     SUPABASE_ANON_KEY: str | None = None
+    GEMINI_API_KEY: str | None = None
     
     class Config:
         env_file = ROOT_ENV_FILE

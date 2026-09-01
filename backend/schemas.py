@@ -280,6 +280,10 @@ class DashboardMetrics(BaseModel):
     delayed_orders: List[dict]
     delivered_this_week: int
     total_customers: int
+    total_registered_customers: Optional[int] = 0
+    active_customers_this_week: Optional[int] = 0
+    active_customers_this_month: Optional[int] = 0
+    active_customers_90_days: Optional[int] = 0
     status_breakdown: List[StatusBreakdown]
     on_time_percentage: float
     late_percentage: float

@@ -5,6 +5,7 @@ from database import get_db
 from models import User, Order, OrderLineItem, Customer, Product, OrderStatus
 from auth import get_current_user
 from utils import calculate_order_status
+from routes.global_analytics import _is_transfer, _compute_order_revenue
 from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 from typing import Optional, List
@@ -16,7 +17,9 @@ router = APIRouter(prefix="/analytics", tags=["analytics-ai"])
 # ---------------------------------------------------------------------------
 # Load the fixed vocabulary schema
 # ---------------------------------------------------------------------------
-SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "visualization_schema.json")
+# NOTE: the JSON lives in backend/ (the parent of routes/), so we walk one
+# directory up from __file__.
+SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "visualization_schema.json")
 
 with open(SCHEMA_PATH, "r") as f:
     VIZ_SCHEMA = json.load(f)
@@ -80,6 +83,22 @@ def visualize(
     Accepts a structured JSON with slots filled from the schema vocabulary.
     Validates every field, queries the database, returns [{label, value}].
     """
+    return execute_structured_query(req, db)
+
+
+def execute_structured_query(req: VisualizeRequest, db: Session) -> VisualizeResponse:
+    """
+    Core deterministic executor shared by the /visualize endpoint and the AI
+    assistant (routes/ai.py).
+
+    It validates every slot against the fixed schema vocabulary, queries the
+    database reusing vetted helpers, recomputes *live* order status (the stored
+    ``order_status`` column is stale), excludes inter-store transfers from
+    customer/sales analytics, and returns chart-ready ``{label, value}`` data.
+
+    The LLM never writes SQL and never sees rows — it only fills these
+    validated slots, so answers cannot be hallucinated.
+    """
 
     # ---- 1. VALIDATE every slot against the schema ----
     if req.metric not in VALID_METRICS:
@@ -119,10 +138,10 @@ def visualize(
     if time_start:
         orders_query = orders_query.filter(Order.dispatch_time >= time_start)
 
-    # ---- 4. Apply filters ----
+    # ---- 4. Apply filters (status is deferred: the DB column is stale) ----
     for f in req.filters:
         if f.id == "status":
-            orders_query = orders_query.filter(Order.order_status == f.value)
+            continue  # handled after live-status recompute below
         elif f.id == "state":
             orders_query = orders_query.join(Customer, Order.customer_id == Customer.id).filter(
                 func.upper(Customer.state) == f.value.upper()
@@ -138,11 +157,15 @@ def visualize(
 
     orders = orders_query.all()
 
-    # Compute live statuses
+    # Exclude inter-store transfers from customer/sales analytics
+    # (mirrors the main dashboard in analytics.py).
+    orders = [o for o in orders if not _is_transfer(o)]
+
+    # Recompute live statuses (the stored order_status column is stale).
     for order in orders:
         order.order_status = calculate_order_status(order)
 
-    # Re-apply status filter after live calculation (since DB status may be stale)
+    # Apply the status filter against the freshly-computed live status.
     status_filter = next((f.value for f in req.filters if f.id == "status"), None)
     if status_filter:
         orders = [o for o in orders if o.order_status.value == status_filter]
@@ -243,10 +266,11 @@ def _calculate_metric(group_orders, metric):
         return len(group_orders)
 
     elif metric == "total_revenue":
-        total = 0.0
-        for o in group_orders:
-            for item in o.line_items:
-                total += item.unit_price * item.quantity
+        # Reuse the vetted revenue helper, which falls back to product.unit_price
+        # when a line item's unit_price is 0/None (the stored value is unreliable).
+        total = sum(_compute_order_revenue(o) for o in group_orders)
+
+
         return round(total, 2)
 
     elif metric == "avg_delivery_hours":

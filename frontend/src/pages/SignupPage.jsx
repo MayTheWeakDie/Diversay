@@ -8,12 +8,12 @@ const SUCCESS_TEXT = "Successfully signed up"
 const PENDING_TEXT = "Ready to access your dashboard"
 
 const COLORS = [
-  { textClass: 'text-teal-400',   hex: '#2dd4bf' }, // Teal
+  { textClass: 'text-teal-400', hex: '#2dd4bf' }, // Teal
   { textClass: 'text-purple-400', hex: '#c084fc' }, // Purple
-  { textClass: 'text-green-400',  hex: '#4ade80' }, // Green
-  { textClass: 'text-rose-400',   hex: '#f0435dff' }, // Coral
-  { textClass: 'text-amber-400',  hex: '#facc15' }, // Gold
-  { textClass: 'text-blue-400',  hex: '#68a9d7ff' }, // Blue
+  { textClass: 'text-green-400', hex: '#4ade80' }, // Green
+  { textClass: 'text-rose-400', hex: '#f0435dff' }, // Coral
+  { textClass: 'text-amber-400', hex: '#facc15' }, // Gold
+  { textClass: 'text-blue-400', hex: '#68a9d7ff' }, // Blue
 ]
 
 const FONTS = [
@@ -36,7 +36,7 @@ export default function SignupPage() {
   const [showCheckAnimation, setShowCheckAnimation] = useState(false)
   const [pendingText, setPendingText] = useState('')
   const [isPendingComplete, setIsPendingComplete] = useState(false)
-  
+
   // Form data
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
@@ -84,83 +84,16 @@ export default function SignupPage() {
   ])
   const [activeColorIdx, setActiveColorIdx] = useState(0)
 
-  // Wave animation effect: Group 0 -> Group 1 -> Group 2 -> Group 1 -> repeat
   useEffect(() => {
-    const sequence = [0, 1, 2, 1]
-    let stepIndex = 0
-
-    const timer = setInterval(() => {
-      const activeGroup = sequence[stepIndex]
-      setGroupFonts(prev => {
-        const next = [...prev]
-        const currentFont = prev[activeGroup] ?? 0
-        let pick
-        do {
-          pick = Math.floor(Math.random() * FONTS.length)
-        } while (pick === currentFont)
-        next[activeGroup] = pick
-        return next
-      })
-
-      if (activeGroup === 2) {
-        setActiveColorIdx(prev => {
-          let pickColor
-          do {
-            pickColor = Math.floor(Math.random() * COLORS.length)
-          } while (pickColor === prev)
-          return pickColor
-        })
-      }
-
-      stepIndex = (stepIndex + 1) % sequence.length
-    }, 180)
-
     setIsReady(true)
-    return () => clearInterval(timer)
   }, [])
-
-  const fontForWord = (wordIdx) => {
-    const g = GROUPS.findIndex(grp => grp.includes(wordIdx))
-    return FONTS[groupFonts[g] ?? 0]
-  }
-
-  const WORDS = HEADING_TEXT.split(' ')
 
   const renderHeading = () => {
     if (!isReady) return null
 
-    const activeColor = COLORS[activeColorIdx]
-
-    const renderWord = (word, wordIdx, isLast) => {
-      const isUnderlinedPart = wordIdx >= 2 // "Sign up here"
-      const font = fontForWord(wordIdx)
-
-      return (
-        <span
-          key={wordIdx}
-          className={`transition-all duration-100 ${isUnderlinedPart ? activeColor.textClass : 'text-white'}`}
-          style={{ fontFamily: font.family, fontStyle: font.style, fontWeight: font.weight }}
-        >
-          {word}{!isLast && ' '}
-        </span>
-      )
-    }
-
-    const nonUnderlined = WORDS.slice(0, 2) // "New", "user?"
-    const underlined = WORDS.slice(2)      // "Sign", "up", "here"
-
     return (
-      <span className="inline-block whitespace-nowrap">
-        {nonUnderlined.map((w, i) => renderWord(w, i, false))}
-        <span className="relative inline-block pb-3">
-          {underlined.map((w, i) => renderWord(w, 2 + i, i === underlined.length - 1))}
-          <span className="absolute left-0 bottom-[-2px] w-full h-[12px] pointer-events-none overflow-visible">
-            <svg viewBox="0 0 100 12" preserveAspectRatio="none" className="w-full h-full fill-none transition-all duration-300" stroke={activeColor.hex} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M 2,6 C 15,1 25,11 38,3 C 50,13 62,1 75,9 C 85,3 92,11 98,5" />
-              <path d="M 4,9 C 16,4 28,13 42,6 C 52,13 65,4 78,11 C 86,7 93,12 97,8" opacity="0.8" />
-            </svg>
-          </span>
-        </span>
+      <span className="text-white" style={{ fontFamily: '"Playfair Display", Georgia, serif', fontWeight: 700, fontStyle: 'normal' }}>
+        New user? Sign up here
       </span>
     )
   }
@@ -168,7 +101,7 @@ export default function SignupPage() {
   // Success message typing animation with realistic timing variance
   useEffect(() => {
     if (!signupSuccess) return
-    
+
     // Vary typing speed per letter (simulating human layout lag/typing speed)
     const delay = Math.max(30, Math.random() * 110)
     const timer = setTimeout(() => {
@@ -194,7 +127,7 @@ export default function SignupPage() {
   // Pending text typing animation with realistic speed variance
   useEffect(() => {
     if (!showCheckAnimation) return
-    
+
     const delay = Math.max(30, Math.random() * 90)
     const timer = setTimeout(() => {
       if (pendingText.length < PENDING_TEXT.length) {
@@ -229,15 +162,15 @@ export default function SignupPage() {
     const hasUppercase = /[A-Z]/.test(password)
     const hasDigit = /[0-9]/.test(password)
     const hasSymbol = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)
-    
+
     const varietyCount = [hasLowercase, hasUppercase, hasDigit, hasSymbol].filter(Boolean).length
     const varietyOk = varietyCount >= 3 || password.length >= 15
 
     // 3. Compromised / Common Dictionary check
     const compromisedList = [
-      'password', 'password123', '123456', '12345678', '123456789', 'qwerty', 
-      'admin', 'admin123', 'welcome', 'letmein', 'secret', 'security', 
-      'diversay', 'account', 'login', 'signup', 'database', 'guest', 
+      'password', 'password123', '123456', '12345678', '123456789', 'qwerty',
+      'admin', 'admin123', 'welcome', 'letmein', 'secret', 'security',
+      'diversay', 'account', 'login', 'signup', 'database', 'guest',
       'master', 'access', 'change', 'default', 'iloveyou'
     ]
     const notCompromised = !compromisedList.includes(lowercasePassword)
@@ -245,7 +178,7 @@ export default function SignupPage() {
     // 4. Common patterns (repeated characters or keyboard/alphabetical sequences)
     // Repeated characters: e.g. "aaaa" (4 or more repeated characters)
     const hasRepeated = /(.)\1{3,}/.test(password)
-    
+
     // Keyboard sequences or common alphabetical sequences (length 5 or more)
     const commonSequences = ['qwerty', 'asdfgh', 'zxcvbn', '12345', 'abcde']
     let hasSequence = false
@@ -255,7 +188,7 @@ export default function SignupPage() {
         break
       }
     }
-    
+
     // Check general alphabetical sequence (e.g. abcd) or numerical sequence (e.g. 1234) of length 4
     if (!hasSequence) {
       for (let i = 0; i < password.length - 3; i++) {
@@ -263,7 +196,7 @@ export default function SignupPage() {
         const char2 = password.charCodeAt(i + 1)
         const char3 = password.charCodeAt(i + 2)
         const char4 = password.charCodeAt(i + 3)
-        
+
         // Ascending sequence (e.g. a-b-c-d or 1-2-3-4)
         if (char2 === char1 + 1 && char3 === char2 + 1 && char4 === char3 + 1) {
           hasSequence = true
@@ -280,12 +213,12 @@ export default function SignupPage() {
 
     // 5. Personal / Contextual Info Check
     let hasPersonalInfo = false
-    
+
     // Check website name "diversay"
     if (lowercasePassword.includes('diversay')) {
       hasPersonalInfo = true
     }
-    
+
     // Check username (longer than 2 characters)
     if (username) {
       const nameParts = username.toLowerCase().split(/\s+/).filter(part => part.length >= 3)
@@ -296,7 +229,7 @@ export default function SignupPage() {
         }
       }
     }
-    
+
     // Check username from email
     if (email) {
       const emailParts = email.toLowerCase().split('@')
@@ -316,23 +249,23 @@ export default function SignupPage() {
       noPersonalInfo,
     })
   }, [password, username, email])
-  
+
   const isPasswordStrong =
     passwordStrength.lengthOk &&
     passwordStrength.varietyOk &&
     passwordStrength.notCompromised &&
     passwordStrength.noPatterns &&
     passwordStrength.noPersonalInfo
-  
+
   const passwordsMatch = password && confirmPassword && password === confirmPassword
   const passwordsMismatch = password && confirmPassword && password !== confirmPassword
-  
+
   const isFormValid =
     username.trim() !== '' &&
     email.trim() !== '' &&
     isPasswordStrong &&
     passwordsMatch
-  
+
   const handleSignup = async (e) => {
     e.preventDefault()
 
@@ -449,152 +382,151 @@ export default function SignupPage() {
       </div>
     )
   }
-  
+
   return (
     <div className="min-h-screen flex flex-col bg-zinc-900 p-4">
       {/* Main content container */}
       <div className="flex-1 flex items-center justify-center py-12 pt-20">
         <div className="w-full max-w-xl text-center">
-        {/* Font-cycling heading */}
-        <h1
-          className="text-4xl md:text-5xl leading-[1.25] mb-4 text-white animate-fadeIn"
-          style={{ letterSpacing: '-0.01em', minHeight: '3.75rem' }}
-        >
-          {renderHeading()}
-        </h1>
+          {/* Font-cycling heading */}
+          <h1
+            className="text-4xl md:text-5xl leading-[1.25] mb-4 text-white animate-fadeIn"
+            style={{ letterSpacing: '-0.01em', minHeight: '3.75rem' }}
+          >
+            {renderHeading()}
+          </h1>
 
-        {/* Content area */}
-        {isReady && (
-          <div className="space-y-6 animate-fadeIn">
-            {/* Privacy policy text */}
-            <p className="text-xs text-gray-400">
-              By continuing, you agree to our <a href="#" className="underline hover:text-gray-300">privacy policy</a>.
-            </p>
+          {/* Content area */}
+          {isReady && (
+            <div className="space-y-6 animate-fadeIn">
+              {/* Privacy policy text */}
+              <p className="text-xs text-gray-400">
+                By continuing, you agree to our <a href="#" className="underline hover:text-gray-300">privacy policy</a>.
+              </p>
 
-            {/* Divider */}
-            <div className="relative py-4">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-600"></div>
+              {/* Divider */}
+              <div className="relative py-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-600"></div>
+                </div>
               </div>
-            </div>
 
-            {/* Already have account link - positioned on divider */}
-            <p className="text-sm text-gray-300 -mt-4">
-              Already have an account?{' '}
-              <button
-                onClick={() => navigate('/login', { state: { skipSplash: true } })}
-                className="underline hover:text-white transition-colors cursor-pointer bg-transparent border-none p-0 font-normal outline-none"
-              >
-                Sign in here
-              </button>
-            </p>
+              {/* Already have account link - positioned on divider */}
+              <p className="text-sm text-gray-300 -mt-4">
+                Already have an account?{' '}
+                <button
+                  onClick={() => navigate('/login', { state: { skipSplash: true } })}
+                  className="underline hover:text-white transition-colors cursor-pointer bg-transparent border-none p-0 font-normal outline-none"
+                >
+                  Sign in here
+                </button>
+              </p>
 
-            {/* Signup form */}
-            <form onSubmit={handleSignup} className="space-y-4">
-              {/* Username input */}
-              <input
-                type="text"
-                placeholder="Username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
-                className="w-full px-4 py-3 bg-gray-800 text-white placeholder-gray-500 border border-gray-700 rounded-lg focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-600 transition-all"
-              />
+              {/* Signup form */}
+              <form onSubmit={handleSignup} className="space-y-4">
+                {/* Username input */}
+                <input
+                  type="text"
+                  placeholder="Username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  className="w-full px-4 py-3 bg-gray-800 text-white placeholder-gray-500 border border-gray-700 rounded-lg focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-600 transition-all"
+                />
 
-              {/* Email input */}
-              <input
-                type="email"
-                placeholder="Email address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full px-4 py-3 bg-gray-800 text-white placeholder-gray-500 border border-gray-700 rounded-lg focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-600 transition-all"
-              />
+                {/* Email input */}
+                <input
+                  type="email"
+                  placeholder="Email address"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="w-full px-4 py-3 bg-gray-800 text-white placeholder-gray-500 border border-gray-700 rounded-lg focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-600 transition-all"
+                />
 
-              {/* Password input */}
-              <div>
+                {/* Password input */}
+                <div>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      className="w-full px-4 py-3 bg-gray-800 text-white placeholder-gray-500 border border-gray-700 rounded-lg focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-600 transition-all pr-12"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
+                    >
+                      {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
+
+                  {/* Password Strength Indicators */}
+                  {password && !isPasswordStrong && (
+                    <div className="mt-3 text-left bg-zinc-950/30 p-3 rounded-lg border border-zinc-800 space-y-1.5 animate-fadeIn">
+                      {passwordRequirements.map((req, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className={`text-sm ${req.met ? 'text-green-500 font-bold' : 'text-gray-500'}`}>
+                            {req.met ? '✓' : '○'}
+                          </span>
+                          <span className={`text-sm transition-all duration-300 ${req.met ? 'text-gray-300' : 'text-gray-500'}`}>
+                            {req.label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Confirm Password input */}
                 <div className="relative">
                   <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    type={showConfirmPassword ? "text" : "password"}
+                    placeholder="Confirm password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
                     required
-                    className="w-full px-4 py-3 bg-gray-800 text-white placeholder-gray-500 border border-gray-700 rounded-lg focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-600 transition-all pr-12"
+                    className={`w-full px-4 py-3 bg-gray-800 text-white placeholder-gray-500 border rounded-lg focus:outline-none focus:ring-1 transition-all pr-12 ${passwordsMismatch
+                        ? 'border-red-600 focus:border-red-500 focus:ring-red-600'
+                        : 'border-gray-700 focus:border-gray-500 focus:ring-gray-600'
+                      }`}
                   />
                   <button
                     type="button"
-                    onClick={() => setShowPassword(!showPassword)}
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                     className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
                   >
-                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
                 </div>
 
-                {/* Password Strength Indicators */}
-                {password && !isPasswordStrong && (
-                  <div className="mt-3 text-left bg-zinc-950/30 p-3 rounded-lg border border-zinc-800 space-y-1.5 animate-fadeIn">
-                    {passwordRequirements.map((req, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <span className={`text-sm ${req.met ? 'text-green-500 font-bold' : 'text-gray-500'}`}>
-                          {req.met ? '✓' : '○'}
-                        </span>
-                        <span className={`text-sm transition-all duration-300 ${req.met ? 'text-gray-300' : 'text-gray-500'}`}>
-                          {req.label}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                {/* Password match feedback */}
+                {confirmPassword && (
+                  <p className={`text-xs ${passwordsMismatch ? 'text-red-500' : passwordsMatch ? 'text-green-500' : 'text-gray-500'}`}>
+                    {passwordsMismatch ? '✗ Passwords do not match' : passwordsMatch ? '✓ Passwords match' : ''}
+                  </p>
                 )}
-              </div>
 
-              {/* Confirm Password input */}
-              <div className="relative">
-                <input
-                  type={showConfirmPassword ? "text" : "password"}
-                  placeholder="Confirm password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                  className={`w-full px-4 py-3 bg-gray-800 text-white placeholder-gray-500 border rounded-lg focus:outline-none focus:ring-1 transition-all pr-12 ${
-                    passwordsMismatch
-                      ? 'border-red-600 focus:border-red-500 focus:ring-red-600'
-                      : 'border-gray-700 focus:border-gray-500 focus:ring-gray-600'
-                  }`}
-                />
+                {/* Error message */}
+                {error && (
+                  <p className="text-red-400 text-xs">{error}</p>
+                )}
+
+                {/* Sign Up button */}
                 <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
+                  type="submit"
+                  disabled={!isFormValid || isLoading}
+                  className="w-full px-4 py-3 bg-gray-200 text-gray-900 rounded-lg font-medium hover:bg-white transition-all disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                  {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  {isLoading ? 'Signing up...' : 'Sign Up'}
                 </button>
-              </div>
-
-              {/* Password match feedback */}
-              {confirmPassword && (
-                <p className={`text-xs ${passwordsMismatch ? 'text-red-500' : passwordsMatch ? 'text-green-500' : 'text-gray-500'}`}>
-                  {passwordsMismatch ? '✗ Passwords do not match' : passwordsMatch ? '✓ Passwords match' : ''}
-                </p>
-              )}
-
-              {/* Error message */}
-              {error && (
-                <p className="text-red-400 text-xs">{error}</p>
-              )}
-
-              {/* Sign Up button */}
-              <button
-                type="submit"
-                disabled={!isFormValid || isLoading}
-                className="w-full px-4 py-3 bg-gray-200 text-gray-900 rounded-lg font-medium hover:bg-white transition-all disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                {isLoading ? 'Signing up...' : 'Sign Up'}
-              </button>
-            </form>
-          </div>
-        )}
-      </div>
+              </form>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Footer - sits below everything */}

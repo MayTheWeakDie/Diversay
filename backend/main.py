@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routes import auth, customers, products, orders, analytics, stores, drivers, vehicles, global_analytics
+from routes import auth, customers, products, orders, analytics, stores, drivers, vehicles, global_analytics, visualize
 from config import get_settings
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -17,45 +17,60 @@ from auth import hash_password
 def seed_admin_user():
     db = SessionLocal()
     try:
-        admin_email = "diversaysolutions@gmail.com"
-        admin_user = db.query(User).filter(User.email == admin_email).first()
-        if not admin_user:
-            logger.info("Seeding permanent admin user...")
-            new_admin = User(
-                email=admin_email,
-                full_name="Grace",
-                password_hash=hash_password("diversaysolutions@2025"),
-                role=UserRole.ADMIN,
-                is_active=True,
-                requesting_admin=False
-            )
-            db.add(new_admin)
-            db.commit()
-            logger.info("Permanent admin user seeded successfully!")
-        else:
-            # Ensure they are an Admin, Active, and details match requested values
-            updated = False
-            if admin_user.full_name != "Grace":
-                admin_user.full_name = "Grace"
-                updated = True
-            if admin_user.role != UserRole.ADMIN:
-                admin_user.role = UserRole.ADMIN
-                updated = True
-            if not admin_user.is_active:
-                admin_user.is_active = True
-                updated = True
+        admins = [
+            {
+                "email": os.getenv("ADMIN1_EMAIL", "diversaysolutions@gmail.com"),
+                "name": "Grace",
+                "password": os.getenv("ADMIN1_PASSWORD", "diversaysolutions@2025")
+            },
+            {
+                "email": os.getenv("ADMIN2_EMAIL", "seunayorinde@gmail.com"),
+                "name": "Mr. Seun",
+                "password": os.getenv("ADMIN2_PASSWORD", "seunayorinder@2025")
+            }
+        ]
+        
+        for item in admins:
+            email = item["email"]
+            name = item["name"]
+            pwd = item["password"]
             
-            # Verify and update password hash if it doesn't match
-            from auth import verify_password
-            if not verify_password("diversaysolutions@2025", admin_user.password_hash):
-                admin_user.password_hash = hash_password("diversaysolutions@2025")
-                updated = True
-                
-            if updated:
+            user = db.query(User).filter(User.email == email).first()
+            if not user:
+                logger.info(f"Seeding permanent admin user {name} ({email})...")
+                new_admin = User(
+                    email=email,
+                    full_name=name,
+                    password_hash=hash_password(pwd),
+                    role=UserRole.ADMIN,
+                    is_active=True,
+                    requesting_admin=False
+                )
+                db.add(new_admin)
                 db.commit()
-                logger.info("Permanent admin user details updated/restored.")
+                logger.info(f"Permanent admin user {name} seeded successfully!")
+            else:
+                updated = False
+                if user.full_name != name:
+                    user.full_name = name
+                    updated = True
+                if user.role != UserRole.ADMIN:
+                    user.role = UserRole.ADMIN
+                    updated = True
+                if not user.is_active:
+                    user.is_active = True
+                    updated = True
+                
+                from auth import verify_password
+                if not verify_password(pwd, user.password_hash):
+                    user.password_hash = hash_password(pwd)
+                    updated = True
+                    
+                if updated:
+                    db.commit()
+                    logger.info(f"Permanent admin user {name} details updated/restored.")
     except Exception as e:
-        logger.error(f"Error seeding admin user: {e}")
+        logger.error(f"Error seeding admin users: {e}")
     finally:
         db.close()
 
@@ -319,6 +334,7 @@ app.include_router(global_analytics.router)
 app.include_router(stores.router)
 app.include_router(drivers.router)
 app.include_router(vehicles.router)
+app.include_router(visualize.router)
 
 @app.get("/")
 def root():

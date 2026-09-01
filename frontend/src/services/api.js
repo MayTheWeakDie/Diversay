@@ -22,7 +22,9 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => {
     const method = response.config?.method?.toUpperCase()
-    if (method && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    // POST /ai/ask is a read-only question — it must NOT wipe the SWR cache.
+    const isReadOnlyPost = response.config?.url?.includes('/ai/ask')
+    if (method && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !isReadOnlyPost) {
       clearCache()
     }
     return response

@@ -31,10 +31,11 @@ def get_dashboard_metrics(
         joinedload(Order.line_items).joinedload(OrderLineItem.product)
     ).all()
     
+    from routes.global_analytics import _is_transfer
     # Exclude inter-store transfers so dashboard counts and analytics reflect only real customer orders
     all_orders = [
         o for o in all_orders_raw 
-        if o.destination_store_id is None and (not o.customer or ("transfer" not in o.customer.name.lower() and o.customer.name != "Inter-Store Transfer"))
+        if not _is_transfer(o)
     ]
     
     for order in all_orders:
@@ -55,7 +56,7 @@ def get_dashboard_metrics(
     delayed_orders = [
         {
             "order_number": o.order_number,
-            "customer_name": o.customer.name,
+            "customer_name": o.customer.name if o.customer else "Unknown",
             "hours_overdue": calculate_hours_overdue(o.expected_delivery_time)
         }
         for o in delayed
@@ -71,6 +72,15 @@ def get_dashboard_metrics(
     # Number of distinct customers that have placed an order this week
     weekly_customer_ids = {o.customer_id for o in orders_week if o.customer_id}
     total_customers = len(weekly_customer_ids)
+    
+    total_registered_customers = db.query(Customer).filter(Customer.is_deleted == False).count()
+    ninety_days_ago_local = today_start_local - timedelta(days=90)
+    orders_30_days_list = [o for o in all_orders if o.created_at and (o.created_at + timedelta(hours=1)) >= thirty_days_ago_local]
+    orders_90_days_list = [o for o in all_orders if o.created_at and (o.created_at + timedelta(hours=1)) >= ninety_days_ago_local]
+
+    active_customers_this_week = len(weekly_customer_ids)
+    active_customers_this_month = len({o.customer_id for o in orders_30_days_list if o.customer_id})
+    active_customers_90_days = len({o.customer_id for o in orders_90_days_list if o.customer_id})
     
     status_counts = {}
     for order in all_orders:
@@ -93,7 +103,8 @@ def get_dashboard_metrics(
     
     state_counts = {}
     for order in all_orders:
-        state = (order.customer.state or "Unknown").strip().upper()
+        customer_state = order.customer.state if order.customer else "Unknown"
+        state = (customer_state or "Unknown").strip().upper()
         state_counts[state] = state_counts.get(state, 0) + 1
     
     top_5_states = [
@@ -142,6 +153,10 @@ def get_dashboard_metrics(
         "delayed_orders": delayed_orders,
         "delivered_this_week": delivered_this_week,
         "total_customers": total_customers,
+        "total_registered_customers": total_registered_customers,
+        "active_customers_this_week": active_customers_this_week,
+        "active_customers_this_month": active_customers_this_month,
+        "active_customers_90_days": active_customers_90_days,
         "status_breakdown": status_breakdown,
         "on_time_percentage": round(on_time_percentage, 2),
         "late_percentage": round(late_percentage, 2),
