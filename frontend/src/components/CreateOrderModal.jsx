@@ -465,7 +465,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
             let prodId = item.product_id
             let q = item.searchQuery
             if (!prodId && item.searchQuery && fetchedProducts.length > 0) {
-              const cleanSearch = item.searchQuery.split('[')[0].replace(/[|;:\&]/g, '').trim()
+              const cleanSearch = item.searchQuery.split('[')[0].replace(/^[^a-zA-Z0-9]+/, '').replace(/[|;:\&=]/g, '').trim()
               const pRes = fuzzyMatch(cleanSearch, fetchedProducts.map(p => ({ id: p.id, name: p.name })))
               if (pRes.match) {
                 const foundP = fetchedProducts.find(p => p.id === pRes.match.id)
@@ -789,10 +789,23 @@ export default function CreateOrderModal({ isOpen, onClose }) {
   const applyScanDataToForm = useCallback((scanData) => {
     if (!scanData) return
 
-    const actualData = scanData.extracted_data || scanData.data || scanData
+    let actualData = scanData
+    while (actualData && (actualData.extracted_data || actualData.data || actualData.result)) {
+      if (actualData.customer_name || actualData.invoice_number || actualData.products) break
+      actualData = actualData.extracted_data || actualData.data || actualData.result
+    }
 
-    const currentCustomers = customersRef.current || []
-    const currentProducts = productsRef.current || []
+    let fallbackParsed = null
+    if (actualData.raw_text) {
+      try {
+        fallbackParsed = parseDocumentText(actualData.raw_text)
+      } catch (err) {
+        console.error('Fallback parse error:', err)
+      }
+    }
+
+    const currentCustomers = (customersRef.current && customersRef.current.length > 0) ? customersRef.current : customers
+    const currentProducts = (productsRef.current && productsRef.current.length > 0) ? productsRef.current : products
 
     setBatchOrders(prev => {
       if (!prev || prev.length === 0) return prev
@@ -800,11 +813,12 @@ export default function CreateOrderModal({ isOpen, onClose }) {
       const order = { ...prev[0] }
 
       // 1. Customer Name
-      const rawCustomerName = (
+      const rawCustomerName = String(
         actualData.customer_name ||
         actualData.customer?.name ||
         actualData.customer ||
         actualData.parsed?.customer_name ||
+        fallbackParsed?.customer_name ||
         ''
       ).trim()
 
@@ -837,85 +851,115 @@ export default function CreateOrderModal({ isOpen, onClose }) {
       }
 
       // 2. Driver & Vehicle
-      const rawDriver = (actualData.driver_name || actualData.driver || '').trim()
+      const rawDriver = String(actualData.driver_name || actualData.driver || '').trim()
       if (rawDriver) {
         order.driverName = rawDriver
         order.showDriverDropdown = false
       }
 
-      const rawVehicle = (actualData.vehicle_number || actualData.vehicle || actualData.plate_number || '').trim()
+      const rawVehicle = String(actualData.vehicle_number || actualData.vehicle || actualData.plate_number || '').trim()
       if (rawVehicle) {
         order.vehicleNumber = rawVehicle
         order.showVehicleDropdown = false
       }
 
       // 3. Invoice & Waybill Reference Cards
-      const brand = actualData.brand || actualData.parsed?.brand || 'DSL'
-      if (order.waybills && order.waybills.length > 0) {
-        const wb = { ...order.waybills[0] }
-        wb.brand = brand
+      const brand = actualData.brand || actualData.parsed?.brand || fallbackParsed?.brand || 'DSL'
 
-        // Clean prefixes if present
-        let rawInv = (
-          actualData.invoice_number ||
-          actualData.invoice_number_full ||
-          actualData.invoice_no ||
-          actualData.parsed?.invoice_number ||
-          ''
-        ).trim()
-        rawInv = rawInv.replace(/^DSL\/SA\//i, '').replace(/^DSLP\/SA\//i, '').trim()
-        if (rawInv) wb.invoiceNumber = rawInv
+      let waybillsList = (order.waybills && order.waybills.length > 0)
+        ? order.waybills
+        : [{ id: Math.random().toString(36).substr(2, 9), brand: 'DSL', waybillNumber: '', invoiceNumber: '', lineItems: [] }]
 
-        let rawWb = (
-          actualData.waybill_number ||
-          actualData.waybill_number_full ||
-          actualData.waybill_no ||
-          actualData.parsed?.waybill_number ||
-          ''
-        ).trim()
-        rawWb = rawWb.replace(/^DSL\/DLN\//i, '').replace(/^DSLP\/DLN\//i, '').trim()
-        if (rawWb) wb.waybillNumber = rawWb
+      const wb = { ...waybillsList[0] }
+      wb.brand = brand
 
-        // 4. Products / Line Items
-        const scannedProducts = actualData.products || actualData.line_items || actualData.parsed?.products || []
-        if (Array.isArray(scannedProducts) && scannedProducts.length > 0) {
-          const matchedLineItems = scannedProducts.map(sp => {
-            const rawProdName = (sp.name || sp.description || sp.product_name || sp.ocr_name || '').trim()
-            const prodName = rawProdName.split('[')[0].replace(/^[^a-zA-Z0-9]+/, '').replace(/[|;:\&]/g, '').trim()
-            let matchedProd = null
-            if (prodName && currentProducts.length > 0) {
-              const pRes = fuzzyMatch(prodName, currentProducts.map(p => ({ id: p.id, name: p.name })))
-              if (pRes.match) {
-                matchedProd = currentProducts.find(p => p.id === pRes.match.id)
-              }
+      // Clean invoice number prefix & noise
+      let rawInv = String(
+        actualData.invoice_number ||
+        actualData.invoice_number_full ||
+        actualData.invoice_no ||
+        actualData.invoice_num ||
+        actualData.invoice ||
+        actualData.sa ||
+        actualData.parsed?.invoice_number ||
+        fallbackParsed?.invoice_number ||
+        ''
+      ).trim()
+      rawInv = rawInv.replace(/^DSLP?\/SA\//i, '').trim()
+      const invNumMatch = rawInv.match(/^(\d+|\w+)/)
+      if (invNumMatch) rawInv = invNumMatch[1]
+      if (rawInv) wb.invoiceNumber = rawInv
+
+      // Clean waybill number prefix & noise
+      let rawWb = String(
+        actualData.waybill_number ||
+        actualData.waybill_number_full ||
+        actualData.waybill_no ||
+        actualData.delivery_no ||
+        actualData.delivery_number ||
+        actualData.dln ||
+        actualData.parsed?.waybill_number ||
+        fallbackParsed?.waybill_number ||
+        ''
+      ).trim()
+      rawWb = rawWb.replace(/^DSLP?\/DLN\//i, '').trim()
+      const wbNumMatch = rawWb.match(/^(\d+|\w+)/)
+      if (wbNumMatch) rawWb = wbNumMatch[1]
+      if (rawWb) wb.waybillNumber = rawWb
+
+      // 4. Products / Line Items
+      const scannedProducts =
+        (Array.isArray(actualData.products) && actualData.products.length > 0) ? actualData.products :
+        (Array.isArray(actualData.line_items) && actualData.line_items.length > 0) ? actualData.line_items :
+        (Array.isArray(actualData.parsed?.products) && actualData.parsed.products.length > 0) ? actualData.parsed.products :
+        (fallbackParsed?.products || [])
+
+      if (Array.isArray(scannedProducts) && scannedProducts.length > 0) {
+        const matchedLineItems = scannedProducts.map(sp => {
+          const rawProdName = (typeof sp === 'string'
+            ? sp
+            : (sp.name || sp.description || sp.product_name || sp.ocr_name || sp.title || sp.item || '')
+          ).toString().trim()
+
+          const prodName = rawProdName
+            .split('[')[0]
+            .replace(/^[^a-zA-Z0-9]+/, '')
+            .replace(/[|;:\&=]/g, '')
+            .trim()
+
+          let matchedProd = null
+          if (prodName && currentProducts.length > 0) {
+            const pRes = fuzzyMatch(prodName, currentProducts.map(p => ({ id: p.id, name: p.name })))
+            if (pRes.match) {
+              matchedProd = currentProducts.find(p => p.id === pRes.match.id)
             }
-
-            const rawQty = sp.quantity || sp.qty || sp.qty_bags || sp.qty_kg || 1
-            const unitStr = 'Pieces' // Backend architecture requires all units to be saved as Pieces
-
-            return {
-              id: Math.random().toString(36).substr(2, 9),
-              product_id: matchedProd ? matchedProd.id.toString() : '',
-              quantity: parseInt(rawQty) || 1,
-              unit: unitStr,
-              searchQuery: matchedProd ? matchedProd.name : prodName
-            }
-          })
-
-          if (matchedLineItems.length > 0) {
-            wb.lineItems = matchedLineItems
           }
-        }
 
-        order.waybills = [wb, ...order.waybills.slice(1)]
+          const rawQty = typeof sp === 'object' ? (sp.quantity || sp.qty || sp.qty_bags || sp.qty_kg || 1) : 1
+          const unitStr = 'Pieces' // Backend architecture requires all units to be saved as Pieces
+
+          return {
+            id: Math.random().toString(36).substr(2, 9),
+            product_id: matchedProd ? matchedProd.id.toString() : '',
+            quantity: Math.max(1, parseInt(rawQty) || 1),
+            unit: unitStr,
+            searchQuery: matchedProd ? matchedProd.name : (prodName || rawProdName)
+          }
+        }).filter(item => item.searchQuery || item.product_id)
+
+        if (matchedLineItems.length > 0) {
+          wb.lineItems = matchedLineItems
+        }
       }
+
+      order.waybills = [wb, ...waybillsList.slice(1)]
 
       return [order, ...prev.slice(1)]
     })
 
     setScanDataApplied(true)
     setOrderCreationMode('manual')
-  }, [])
+  }, [customers, products])
 
   const startScanSession = useCallback(async () => {
     try {
