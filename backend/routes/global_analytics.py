@@ -103,10 +103,22 @@ def get_global_analytics(
     Comprehensive cross-store analytics endpoint.
     Aggregates order data across ALL stores, excluding inter-store transfers.
     """
-    # ── Fetch all non-deleted orders with relationships ──
-    all_orders_raw = db.query(Order).filter(
-        Order.is_deleted == False
-    ).options(
+    from sqlalchemy import or_
+    now = datetime.utcnow()
+    cutoff = None
+    if timeframe != "all":
+        try:
+            max_days = float(timeframe)
+            if max_days:
+                cutoff = now - timedelta(days=max_days)
+        except ValueError:
+            pass
+
+    query = db.query(Order).filter(Order.is_deleted == False)
+    if cutoff:
+        query = query.filter(or_(Order.dispatch_time >= cutoff, Order.created_at >= cutoff))
+
+    all_orders_raw = query.options(
         joinedload(Order.line_items).joinedload(OrderLineItem.product),
         joinedload(Order.customer),
         joinedload(Order.source_store),
@@ -115,21 +127,6 @@ def get_global_analytics(
 
     # ── Filter out inter-store transfers ──
     all_orders = [o for o in all_orders_raw if not _is_transfer(o)]
-
-    # ── Apply timeframe filter ──
-    now = datetime.utcnow()
-    if timeframe != "all":
-        try:
-            max_days = float(timeframe)
-        except ValueError:
-            max_days = None
-
-        if max_days:
-            cutoff = now - timedelta(days=max_days)
-            all_orders = [
-                o for o in all_orders
-                if (o.dispatch_time or o.created_at or now) >= cutoff
-            ]
 
     if not all_orders:
         return _empty_response(timeframe)

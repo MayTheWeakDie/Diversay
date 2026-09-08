@@ -372,6 +372,28 @@ def transfer_inter_store(
         "transfers_detail": transfers_detail
     }
 
+def serialize_store_transaction(order: Order) -> dict:
+    return {
+        "id": order.id,
+        "order_number": order.order_number,
+        "customer_name": order.customer.name if order.customer else "Unknown",
+        "source_store_id": order.source_store_id,
+        "source_store_name": order.source_store.name if order.source_store else None,
+        "destination_store_id": order.destination_store_id,
+        "destination_store_name": order.destination_store.name if order.destination_store else None,
+        "dispatch_time": order.dispatch_time.isoformat() if order.dispatch_time else None,
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+        "line_items": [
+            {
+                "product_name": item.product.name if item.product else "Unknown",
+                "brand": (item.product.brand or "DSL").upper() if item.product else "DSL",
+                "quantity": item.quantity,
+                "unit": item.unit.value if hasattr(item.unit, 'value') else str(item.unit)
+            }
+            for item in (order.line_items or [])
+        ]
+    }
+
 @router.get("/{store_id}/analytics")
 def get_store_analytics(
     store_id: int,
@@ -399,10 +421,8 @@ def get_store_analytics(
     ).options(
         joinedload(Order.line_items).joinedload(OrderLineItem.product),
         joinedload(Order.customer),
-        joinedload(Order.created_by_user),
         joinedload(Order.source_store),
-        joinedload(Order.destination_store),
-        joinedload(Order.reference_cards).joinedload(OrderReferenceCard.line_items).joinedload(OrderLineItem.product)
+        joinedload(Order.destination_store)
     ).all()
     
     outgoing_orders = db.query(Order).filter(
@@ -411,10 +431,8 @@ def get_store_analytics(
     ).options(
         joinedload(Order.line_items).joinedload(OrderLineItem.product),
         joinedload(Order.customer),
-        joinedload(Order.created_by_user),
         joinedload(Order.source_store),
-        joinedload(Order.destination_store),
-        joinedload(Order.reference_cards).joinedload(OrderReferenceCard.line_items).joinedload(OrderLineItem.product)
+        joinedload(Order.destination_store)
     ).all()
     
     total_incoming = len(incoming_orders)
@@ -536,8 +554,8 @@ def get_store_analytics(
         for d, val in sorted(movement_dates.items())
     ]
 
-    incoming_transactions = [get_order_with_details(o) for o in sorted(incoming_orders, key=lambda x: x.created_at or datetime.min, reverse=True)]
-    outgoing_transactions = [get_order_with_details(o) for o in sorted(outgoing_orders, key=lambda x: x.created_at or datetime.min, reverse=True)]
+    incoming_transactions = [serialize_store_transaction(o) for o in sorted(incoming_orders, key=lambda x: x.created_at or datetime.min, reverse=True)[:100]]
+    outgoing_transactions = [serialize_store_transaction(o) for o in sorted(outgoing_orders, key=lambda x: x.created_at or datetime.min, reverse=True)[:100]]
     
     return {
         "total_incoming": total_incoming,

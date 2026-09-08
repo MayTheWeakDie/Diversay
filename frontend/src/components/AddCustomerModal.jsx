@@ -81,9 +81,9 @@ export default function AddCustomerModal({ isOpen, onClose, initialName = '', on
       />
 
       {/* Modal Container */}
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="relative bg-zinc-950/75 border border-white/15 backdrop-blur-3xl rounded-2xl shadow-[0_35px_80px_-15px_rgba(0,0,0,0.9)] ring-1 ring-white/10 max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-950/50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.03]">
           <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
             <Users size={16} className="text-zinc-400" />
             Add New Customer

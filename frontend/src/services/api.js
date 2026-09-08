@@ -22,8 +22,8 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => {
     const method = response.config?.method?.toUpperCase()
-    // POST /ai/ask is a read-only question — it must NOT wipe the SWR cache.
-    const isReadOnlyPost = response.config?.url?.includes('/ai/ask')
+    // POST /ai/ask and /scan-sessions are read-only / session operations — they must NOT wipe the SWR cache.
+    const isReadOnlyPost = response.config?.url?.includes('/ai/ask') || response.config?.url?.includes('/scan-sessions')
     if (method && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !isReadOnlyPost) {
       clearCache()
     }
@@ -49,14 +49,14 @@ const pendingPromises = new Map()
 
 export const getWithCache = async (url, config = {}) => {
   // Generate a unique cache key that includes query parameters
-  const cacheKey = config.params 
-    ? `${url}?${new URLSearchParams(config.params).toString()}` 
+  const cacheKey = config.params
+    ? `${url}?${new URLSearchParams(config.params).toString()}`
     : url
 
   // If data is in cache, return immediately and trigger background refresh
   if (memoryCache.has(cacheKey)) {
     const cachedData = memoryCache.get(cacheKey)
-    
+
     // Background fetch (silent revalidation)
     api.get(url, config).then((response) => {
       memoryCache.set(cacheKey, response.data)
@@ -66,7 +66,7 @@ export const getWithCache = async (url, config = {}) => {
     }).catch((err) => {
       console.error('Silent background refresh failed:', err)
     })
-    
+
     return { data: cachedData, fromCache: true }
   }
 
@@ -94,7 +94,7 @@ export const getWithCache = async (url, config = {}) => {
     })
 
   pendingPromises.set(cacheKey, promise)
-  
+
   try {
     const data = await promise
     return { data, fromCache: false }
@@ -104,15 +104,15 @@ export const getWithCache = async (url, config = {}) => {
 }
 
 export const isCached = (url, config = {}) => {
-  const cacheKey = config.params 
-    ? `${url}?${new URLSearchParams(config.params).toString()}` 
+  const cacheKey = config.params
+    ? `${url}?${new URLSearchParams(config.params).toString()}`
     : url
   return memoryCache.has(cacheKey)
 }
 
 export const invalidateCache = (url, config = {}) => {
-  const cacheKey = config.params 
-    ? `${url}?${new URLSearchParams(config.params).toString()}` 
+  const cacheKey = config.params
+    ? `${url}?${new URLSearchParams(config.params).toString()}`
     : url
   memoryCache.delete(cacheKey)
 
@@ -126,8 +126,8 @@ export const invalidateCache = (url, config = {}) => {
 }
 
 export const updateCache = (url, data, config = {}) => {
-  const cacheKey = config.params 
-    ? `${url}?${new URLSearchParams(config.params).toString()}` 
+  const cacheKey = config.params
+    ? `${url}?${new URLSearchParams(config.params).toString()}`
     : url
   memoryCache.set(cacheKey, data)
 }

@@ -1,3 +1,4 @@
+import React, { lazy, Suspense } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -20,6 +21,8 @@ import RequestAccessPage from './pages/RequestAccessPage'
 import WeeklyCustomersPage from './pages/WeeklyCustomersPage'
 import GlobalAnalyticsPage from './pages/GlobalAnalyticsPage'
 
+const ScanUploadPage = lazy(() => import('./pages/ScanUploadPage'))
+
 function App() {
   return (
     <AuthProvider>
@@ -28,6 +31,14 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/pending-approval" element={<PendingApprovalPage />} />
+          <Route 
+            path="/scan/:sessionId" 
+            element={
+              <Suspense fallback={<div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">Loading scanner...</div>}>
+                <ScanUploadPage />
+              </Suspense>
+            } 
+          />
           
           <Route element={<ProtectedRoute />}>
             <Route element={<DashboardLayout />}>

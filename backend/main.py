@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routes import auth, customers, products, orders, analytics, stores, drivers, vehicles, global_analytics, visualize
+from routes import auth, customers, products, orders, analytics, stores, drivers, vehicles, global_analytics, visualize, scan
 from config import get_settings
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -336,6 +336,7 @@ app.include_router(stores.router)
 app.include_router(drivers.router)
 app.include_router(vehicles.router)
 app.include_router(visualize.router)
+app.include_router(scan.router)
 
 @app.get("/")
 def root():

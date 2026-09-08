@@ -37,7 +37,7 @@ import {
   LineChart, Line,
   ZAxis
 } from 'recharts'
-import api from '../services/api'
+import api, { getWithCache, isCached } from '../services/api'
 
 // ── Color Palettes ──────────────────────────────────
 const GRADIENTS = {
@@ -394,10 +394,16 @@ export default function GlobalAnalyticsPage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      setLoading(true)
+      const cacheKey = `/analytics/global?timeframe=${timeframe}`
+      const hasCached = isCached(cacheKey)
+      if (!hasCached && !data) {
+        setLoading(true)
+      }
       setError(null)
       try {
-        const res = await api.get(`/analytics/global?timeframe=${timeframe}`)
+        const res = await getWithCache(cacheKey, {
+          onCacheUpdate: (newData) => setData(newData)
+        })
         setData(res.data)
       } catch (err) {
         console.error('Failed to load global analytics:', err)

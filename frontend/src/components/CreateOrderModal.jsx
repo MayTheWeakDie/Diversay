@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { X, Plus, Trash2, Edit2, Calendar, User, UserPlus, Package, FileText, Truck, AlertCircle, RefreshCw, CheckCircle } from 'lucide-react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { X, Plus, Trash2, Edit2, Calendar, User, UserPlus, Package, FileText, Truck, AlertCircle, RefreshCw, CheckCircle, Camera, ScanLine, ArrowLeft } from 'lucide-react'
 import api, { getWithCache, invalidateCache } from '../services/api'
 import { useNavigate } from 'react-router-dom'
 import AddCustomerModal from './AddCustomerModal'
+import { QRCodeSVG } from 'qrcode.react'
+import { fuzzyMatch } from '../utils/ocrParser'
 
 const getConversionFactor = (productName) => {
   const nameLower = (productName || '').toLowerCase();
@@ -30,29 +32,29 @@ const ProductSearchDropdown = ({ query, products, onSelect }) => {
   if (filtered.length === 0) return null
 
   return (
-    <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-950/90 border border-zinc-800/80 rounded-xl shadow-2xl z-50 max-h-[132px] overflow-y-auto custom-product-dropdown-scroll backdrop-blur-xl">
-      <ul className="divide-y divide-zinc-900/50">
+    <div className="absolute left-0 right-0 top-full mt-2 bg-gradient-to-b from-white/[0.12] via-white/[0.05] to-zinc-950/40 border border-white/25 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.3)] z-50 max-h-[180px] overflow-y-auto custom-product-dropdown-scroll backdrop-blur-2xl backdrop-saturate-200 ring-1 ring-white/15">
+      <ul className="divide-y divide-white/15">
         {filtered.map((product) => (
           <li key={product.id}>
             <button
               type="button"
               onClick={() => onSelect(product)}
-              className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:text-white hover:bg-zinc-800/60 transition-colors flex justify-between items-center"
+              className="w-full px-4 py-2.5 text-left text-sm text-zinc-100 hover:text-white hover:bg-white/15 transition-all duration-150 flex justify-between items-center group"
             >
               <div className="flex items-center gap-2">
-                <span className="font-medium text-zinc-100">{product.name}</span>
+                <span className="font-semibold text-zinc-100 group-hover:text-white">{product.name}</span>
                 {product.brand && (
                   <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
                     product.brand.toUpperCase() === 'DSLP'
-                      ? 'bg-purple-500/25 text-purple-400 border border-purple-500/35'
-                      : 'bg-sky-500/25 text-sky-400 border border-sky-500/35'
+                      ? 'bg-purple-500/25 text-purple-200 border border-purple-400/40 backdrop-blur-md'
+                      : 'bg-sky-500/25 text-sky-200 border border-sky-400/40 backdrop-blur-md'
                   }`}>
                     {product.brand}
                   </span>
                 )}
               </div>
               {product.category && (
-                <span className="text-[10px] text-zinc-400 font-semibold px-2 py-0.5 bg-zinc-800 rounded uppercase tracking-wider">
+                <span className="text-[10px] text-zinc-200 font-semibold px-2 py-0.5 bg-white/15 rounded-md border border-white/20 uppercase tracking-wider backdrop-blur-md">
                   {product.category}
                 </span>
               )}
@@ -120,6 +122,14 @@ export default function CreateOrderModal({ isOpen, onClose }) {
   const [actionInputVal, setActionInputVal] = useState('')
   const [quickCustomerModal, setQuickCustomerModal] = useState({ isOpen: false, orderId: null, initialName: '' })
   const [customerToast, setCustomerToast] = useState('')
+
+  // ── Scan Mode State ──
+  const [orderCreationMode, setOrderCreationMode] = useState(null) // null (choosing), 'manual', 'scan'
+  const [scanSession, setScanSession] = useState(null) // { session_id, session_secret }
+  const [scanStatus, setScanStatus] = useState('idle') // idle | waiting | completed | expired | error
+  const [scanStatusMessage, setScanStatusMessage] = useState('')
+  const pollTimerRef = useRef(null)
+  const [scanDataApplied, setScanDataApplied] = useState(false)
 
   const handleOpenQuickCustomerModal = (orderId, initialName = '') => {
     setQuickCustomerModal({
@@ -339,6 +349,22 @@ export default function CreateOrderModal({ isOpen, onClose }) {
       setStoreInventories({})
       fetchFormData()
       setShowSuccess(false)
+      // Reset scan mode
+      setOrderCreationMode(null)
+      setScanSession(null)
+      setScanStatus('idle')
+      setScanStatusMessage('')
+      setScanDataApplied(false)
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current)
+        pollTimerRef.current = null
+      }
+    }
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current)
+        pollTimerRef.current = null
+      }
     }
   }, [isOpen])
 
@@ -717,6 +743,131 @@ export default function CreateOrderModal({ isOpen, onClose }) {
     }))
   }
 
+  // ─── Scan Mode Functions ──────────────────────────────────────────────────
+  const FRONTEND_URL = window.location.origin
+
+  const startScanSession = useCallback(async () => {
+    try {
+      setScanStatus('waiting')
+      setScanStatusMessage('Generating QR code...')
+      const res = await api.post('/scan-sessions/')
+      const { session_id, session_secret } = res.data
+      setScanSession({ session_id, session_secret })
+      setScanStatusMessage('Scan the QR code with your phone')
+
+      // Start polling every 2 seconds
+      pollTimerRef.current = setInterval(async () => {
+        try {
+          const pollRes = await api.get(`/scan-sessions/${session_id}/result`)
+          const { status: sessionStatus, data } = pollRes.data
+
+          if (sessionStatus === 'completed' && data) {
+            // Stop polling
+            clearInterval(pollTimerRef.current)
+            pollTimerRef.current = null
+            setScanStatus('completed')
+            setScanStatusMessage('Document data received! Filling order form...')
+
+            // Apply the extracted data to the form
+            applyScanDataToForm(data)
+          } else if (sessionStatus === 'expired') {
+            clearInterval(pollTimerRef.current)
+            pollTimerRef.current = null
+            setScanStatus('expired')
+            setScanStatusMessage('Scan session expired. Please try again.')
+          }
+        } catch (err) {
+          console.error('Poll error:', err)
+        }
+      }, 2000)
+    } catch (err) {
+      console.error('Failed to create scan session:', err)
+      setScanStatus('error')
+      setScanStatusMessage('Failed to start scan session. Please try again.')
+    }
+  }, [])
+
+  const applyScanDataToForm = useCallback((scanData) => {
+    // scanData contains: customer_name, invoice_number, waybill_number, brand, date, products, etc.
+    setBatchOrders(prev => {
+      const order = { ...prev[0] } // Apply to the first (and usually only) order
+
+      // 1. Match customer by name
+      if (scanData.customer_name && customers.length > 0) {
+        const customerResult = fuzzyMatch(
+          scanData.customer_name,
+          customers.map(c => ({ id: c.id, name: c.name }))
+        )
+        if (customerResult.match) {
+          const matchedCustomer = customers.find(c => c.id === customerResult.match.id)
+          if (matchedCustomer) {
+            order.customerId = matchedCustomer.id.toString()
+            order.customerSearchQuery = matchedCustomer.name
+            order.customerState = matchedCustomer.state || ''
+            order.customerCity = matchedCustomer.city || ''
+            order.showCustomerDropdown = false
+            order.matchingCustomers = []
+          }
+        } else {
+          // No match — put the OCR name in the search field so user can pick manually
+          order.customerSearchQuery = scanData.customer_name
+          order.matchingCustomers = searchCustomersLocally(scanData.customer_name, customers).slice(0, 4)
+          order.showCustomerDropdown = true
+        }
+      }
+
+      // 2. Fill waybill/invoice on the first reference card
+      const brand = scanData.brand || 'DSL'
+      if (order.waybills && order.waybills.length > 0) {
+        const wb = { ...order.waybills[0] }
+        wb.brand = brand
+        if (scanData.waybill_number) {
+          wb.waybillNumber = scanData.waybill_number
+        }
+        if (scanData.invoice_number) {
+          wb.invoiceNumber = scanData.invoice_number
+        }
+
+        // 3. Match products
+        if (scanData.products && scanData.products.length > 0 && products.length > 0) {
+          const matchedLineItems = scanData.products.map(scannedProduct => {
+            const productResult = fuzzyMatch(
+              scannedProduct.name,
+              products.map(p => ({ id: p.id, name: p.name }))
+            )
+            const matchedProd = productResult.match ? products.find(p => p.id === productResult.match.id) : null
+            return {
+              product_id: matchedProd ? matchedProd.id.toString() : '',
+              quantity: scannedProduct.quantity || 1,
+              unit: scannedProduct.unit === 'Carton' ? 'Cartons' : 'Pieces',
+              searchQuery: matchedProd ? matchedProd.name : scannedProduct.name
+            }
+          })
+          wb.lineItems = matchedLineItems.length > 0 ? matchedLineItems : wb.lineItems
+        }
+
+        order.waybills = [wb, ...order.waybills.slice(1)]
+      }
+
+      return [order, ...prev.slice(1)]
+    })
+
+    setScanDataApplied(true)
+    // Switch to manual mode so user can review the auto-filled form
+    setOrderCreationMode('manual')
+  }, [customers, products])
+
+  const cancelScanSession = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+    setScanSession(null)
+    setScanStatus('idle')
+    setScanStatusMessage('')
+    setOrderCreationMode(null)
+  }, [])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     
@@ -934,25 +1085,229 @@ export default function CreateOrderModal({ isOpen, onClose }) {
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.03]">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/20 flex items-center justify-center">
                   <Plus size={18} className="text-white" />
                 </div>
                 <h3 className="text-xl font-bold text-white">
-                  {batchOrders.length > 1 ? `Create Batch Orders (${batchOrders.length})` : 'Create New Order'}
+                  {orderCreationMode === 'scan' ? 'Scan Document' : batchOrders.length > 1 ? `Create Batch Orders (${batchOrders.length})` : 'Create New Order'}
                 </h3>
+                {scanDataApplied && orderCreationMode === 'manual' && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 uppercase tracking-wider">
+                    Scan-filled
+                  </span>
+                )}
               </div>
-              <button
-                onClick={onClose}
-                className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors"
-                disabled={submitting}
-              >
-                <X size={20} />
-              </button>
+
+              <div className="flex items-center gap-2">
+                {orderCreationMode !== null && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (orderCreationMode === 'scan') cancelScanSession()
+                      setOrderCreationMode(null)
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/15 rounded-xl transition-all shadow-sm"
+                    title="Change order creation method"
+                  >
+                    <ArrowLeft size={13} />
+                    <span>Mode Selection</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => {
+                    cancelScanSession()
+                    onClose()
+                  }}
+                  className="p-1.5 hover:bg-white/10 rounded-lg text-zinc-400 hover:text-white transition-colors"
+                  disabled={submitting}
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
-        {/* Content Form */}
+        {/* ─── Mode Selector (shown before form when no mode is chosen) ─── */}
+        {orderCreationMode === null && !loading && (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 bg-zinc-950/40 backdrop-blur-2xl">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/15 rounded-full text-xs font-semibold text-zinc-300 mb-3">
+                <Package size={14} className="text-purple-400" />
+                <span>Order Creation Setup</span>
+              </div>
+              <h4 className="text-xl font-bold text-white tracking-tight">How would you like to create this order?</h4>
+              <p className="text-xs text-zinc-400 mt-1">Choose your preferred method to proceed</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-lg">
+              {/* Manual Entry */}
+              <button
+                type="button"
+                onClick={() => setOrderCreationMode('manual')}
+                className="group flex flex-col items-center text-center gap-3 p-6 bg-white/[0.03] border border-white/15 rounded-2xl hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-all hover:-translate-y-0.5 shadow-xl backdrop-blur-xl"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform shadow-lg shadow-emerald-500/10">
+                  <FileText size={26} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-zinc-100 group-hover:text-white">Type Manually</p>
+                  <p className="text-[11px] text-zinc-400 mt-1 leading-snug">Enter customer & order details line by line</p>
+                </div>
+              </button>
+              
+              {/* Scan Document */}
+              <button
+                type="button"
+                onClick={() => {
+                  setOrderCreationMode('scan')
+                  startScanSession()
+                }}
+                className="group flex flex-col items-center text-center gap-3 p-6 bg-white/[0.03] border border-white/15 rounded-2xl hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-all hover:-translate-y-0.5 shadow-xl backdrop-blur-xl"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform shadow-lg shadow-indigo-500/10">
+                  <Camera size={26} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-zinc-100 group-hover:text-white">Scan Document</p>
+                  <p className="text-[11px] text-zinc-400 mt-1 leading-snug">Upload photo via phone camera QR code</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── QR Code Scan View ─── */}
+        {orderCreationMode === 'scan' && scanStatus !== 'completed' && (
+          <div className="flex-1 flex items-center justify-center p-6 md:p-8 bg-zinc-950/40 backdrop-blur-2xl">
+            {scanStatus === 'waiting' && scanSession ? (
+              <div className="w-full max-w-2xl bg-white/[0.03] border border-white/15 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-300 ring-1 ring-white/10 grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 items-center">
+                {/* Left Side: QR Code */}
+                <div className="flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-white/10 pb-6 md:pb-0 md:pr-6">
+                  <div className="bg-white p-3.5 rounded-2xl shadow-[0_0_40px_rgba(99,102,241,0.2)] border border-white/20">
+                    <QRCodeSVG
+                      value={`${FRONTEND_URL}/scan/${scanSession.session_id}?secret=${scanSession.session_secret}`}
+                      size={200}
+                      level="M"
+                      includeMargin={false}
+                      bgColor="#ffffff"
+                      fgColor="#09090b"
+                    />
+                  </div>
+                  <span className="text-[10px] text-zinc-400 font-extrabold mt-3 tracking-widest uppercase flex items-center gap-1.5">
+                    <ScanLine size={12} className="text-indigo-400" />
+                    Scan Secure QR Code
+                  </span>
+                </div>
+
+                {/* Right Side: Instructions & Controls */}
+                <div className="flex flex-col justify-between space-y-4 text-left">
+                  <div>
+                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 rounded-full text-xs font-semibold mb-3">
+                      <Camera size={13} />
+                      <span>Mobile Camera Upload</span>
+                    </div>
+                    <h4 className="text-xl font-bold text-white tracking-tight">Scan with your phone</h4>
+                    <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+                      Point your phone camera at the QR code. You'll open a secure upload link to snap a photo of your invoice or delivery note.
+                    </p>
+                  </div>
+
+                  {/* Status indicator */}
+                  <div className="bg-white/[0.04] border border-white/10 rounded-xl p-3 flex items-center gap-3">
+                    <div className="relative flex h-3 w-3 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                    </div>
+                    <span className="text-xs text-zinc-300 font-medium">Waiting for photo upload from phone...</span>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        cancelScanSession()
+                        setOrderCreationMode(null)
+                      }}
+                      className="flex-1 px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/15 text-zinc-300 hover:text-white text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <ArrowLeft size={13} />
+                      <span>Mode Selection</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        cancelScanSession()
+                        setOrderCreationMode('manual')
+                      }}
+                      className="flex-1 px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/15 text-zinc-300 hover:text-white text-xs font-semibold rounded-xl transition-all text-center"
+                    >
+                      Type Manually
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : scanStatus === 'expired' ? (
+              <div className="text-center animate-in fade-in duration-300 max-w-md bg-white/[0.03] border border-white/15 p-8 rounded-3xl backdrop-blur-2xl">
+                <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-400 flex items-center justify-center mx-auto mb-4">
+                  <AlertCircle size={32} />
+                </div>
+                <h4 className="text-lg font-bold text-zinc-100 mb-2">Session Expired</h4>
+                <p className="text-sm text-zinc-500 mb-6">The scan session timed out. Generate a new QR code to try again.</p>
+                <div className="flex items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScanStatus('idle')
+                      startScanSession()
+                    }}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-indigo-600/20 transition-all hover:-translate-y-0.5"
+                  >
+                    Generate New QR Code
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      cancelScanSession()
+                      setOrderCreationMode(null)
+                    }}
+                    className="px-4 py-2.5 border border-white/15 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-xs font-semibold rounded-xl transition-all"
+                  >
+                    Mode Selection
+                  </button>
+                </div>
+              </div>
+            ) : scanStatus === 'error' ? (
+              <div className="text-center animate-in fade-in duration-300 max-w-md bg-white/[0.03] border border-white/15 p-8 rounded-3xl backdrop-blur-2xl">
+                <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/25 text-red-400 flex items-center justify-center mx-auto mb-4">
+                  <AlertCircle size={32} />
+                </div>
+                <h4 className="text-lg font-bold text-zinc-100 mb-2">Something went wrong</h4>
+                <p className="text-sm text-zinc-500 mb-6">{scanStatusMessage}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    cancelScanSession()
+                    setOrderCreationMode(null)
+                  }}
+                  className="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-semibold rounded-xl transition-all"
+                >
+                  Go Back
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12">
+                <RefreshCw size={24} className="animate-spin text-indigo-400 mb-3" />
+                <span className="text-sm text-zinc-300 font-semibold">Starting scan session...</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── Normal Form (shown when manual mode or scan completed) ─── */}
+        {(orderCreationMode === 'manual') && (
+        <>
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6 custom-modal-scroll bg-zinc-900/20" style={{ overscrollBehavior: 'contain' }}>
           {error && (
             <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex gap-3 text-red-400 text-sm">
@@ -1034,28 +1389,28 @@ export default function CreateOrderModal({ isOpen, onClose }) {
                         />
                         
                         {order.showCustomerDropdown && (
-                          <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-950/90 border border-zinc-800/80 rounded-xl shadow-2xl z-50 overflow-hidden backdrop-blur-md">
+                          <div className="absolute left-0 right-0 top-full mt-2 bg-gradient-to-b from-white/[0.14] via-white/[0.06] to-zinc-950/45 border border-white/25 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.3)] z-50 overflow-hidden backdrop-blur-2xl backdrop-saturate-200 ring-1 ring-white/15">
                             {order.matchingCustomers.length > 0 && (
-                              <ul className="divide-y divide-zinc-900/50 max-h-52 overflow-y-auto custom-product-dropdown-scroll">
+                              <ul className="divide-y divide-white/15 max-h-52 overflow-y-auto custom-product-dropdown-scroll">
                                 {order.matchingCustomers.map((c) => (
                                   <li key={c.id}>
                                     <button
                                       type="button"
                                       onClick={() => handleSelectCustomer(order.id, c)}
-                                      className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:text-white hover:bg-zinc-800/60 transition-colors flex justify-between items-center"
+                                      className="w-full px-4 py-2.5 text-left text-sm text-zinc-100 hover:text-white hover:bg-white/15 transition-all duration-150 flex justify-between items-center group"
                                     >
-                                      <span className="font-medium text-zinc-100">{c.name}</span>
-                                      {c.state && <span className="text-xs text-zinc-400 font-semibold px-2 py-0.5 bg-zinc-800 rounded">{c.state}</span>}
+                                      <span className="font-semibold text-zinc-100 group-hover:text-white">{c.name}</span>
+                                      {c.state && <span className="text-[10px] text-zinc-200 font-bold px-2 py-0.5 bg-white/15 rounded-md border border-white/20 uppercase tracking-wider backdrop-blur-md shadow-inner">{c.state}</span>}
                                     </button>
                                   </li>
                                 ))}
                               </ul>
                             )}
-                            <div className="p-1.5 bg-zinc-950/90 border-t border-zinc-800/80">
+                            <div className="p-1.5 bg-white/[0.04] backdrop-blur-2xl border-t border-white/15">
                               <button
                                 type="button"
                                 onClick={() => handleOpenQuickCustomerModal(order.id, order.customerSearchQuery)}
-                                className="w-full px-3 py-2 text-left text-xs font-semibold text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 rounded-lg flex items-center gap-2 transition-colors"
+                                className="w-full px-3 py-2 text-left text-xs font-semibold text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/25 rounded-xl flex items-center gap-2 transition-all border border-emerald-500/30 backdrop-blur-md bg-white/[0.02]"
                               >
                                 <UserPlus size={14} />
                                 <span>
@@ -1530,18 +1885,18 @@ export default function CreateOrderModal({ isOpen, onClose }) {
                           
                           {/* Driver Dropdown */}
                           {order.showDriverDropdown && (
-                            <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-950/75 border border-zinc-800/80 rounded-xl shadow-xl z-50 max-h-[160px] overflow-y-auto custom-product-dropdown-scroll backdrop-blur-md">
-                              <ul className="divide-y divide-zinc-900/50">
+                            <div className="absolute left-0 right-0 top-full mt-2 bg-gradient-to-b from-white/[0.14] via-white/[0.06] to-zinc-950/45 border border-white/25 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.3)] z-50 max-h-[180px] overflow-y-auto custom-product-dropdown-scroll backdrop-blur-2xl backdrop-saturate-200 ring-1 ring-white/15">
+                              <ul className="divide-y divide-white/15">
                                 {drivers
                                   .filter(d => d.name.toLowerCase().includes(order.driverName.toLowerCase()))
                                   .map(d => (
-                                    <li key={d.id} className="group/item flex items-center justify-between hover:bg-zinc-800/60 transition-colors px-4 py-2.5">
+                                    <li key={d.id} className="group/item flex items-center justify-between hover:bg-white/15 transition-all duration-150 px-4 py-2.5">
                                       <button
                                         type="button"
                                         onClick={() => {
                                           setBatchOrders(prev => prev.map(o => o.id === order.id ? { ...o, driverName: d.name, showDriverDropdown: false } : o))
                                         }}
-                                        className="flex-1 text-left text-sm text-zinc-300 hover:text-white transition-colors"
+                                        className="flex-1 text-left text-sm text-zinc-100 group-hover/item:text-white transition-colors font-medium"
                                       >
                                         {d.name}
                                       </button>
@@ -1553,7 +1908,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
                                             setActionItem({ type: 'edit_driver', driver: d })
                                             setActionInputVal(d.name)
                                           }}
-                                          className="p-1 hover:bg-zinc-700/50 hover:text-amber-400 text-zinc-550 rounded-md transition-colors cursor-pointer"
+                                          className="p-1 hover:bg-white/20 hover:text-amber-300 text-zinc-300 rounded-md transition-colors cursor-pointer"
                                           title="Rename Driver"
                                         >
                                           <Edit2 size={13} />
@@ -1564,7 +1919,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
                                             e.stopPropagation()
                                             setActionItem({ type: 'delete_driver', driver: d })
                                           }}
-                                          className="p-1 hover:bg-zinc-700/50 hover:text-red-400 text-zinc-550 rounded-md transition-colors cursor-pointer"
+                                          className="p-1 hover:bg-white/20 hover:text-red-300 text-zinc-300 rounded-md transition-colors cursor-pointer"
                                           title="Delete Driver"
                                         >
                                           <Trash2 size={13} />
@@ -1573,7 +1928,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
                                     </li>
                                   ))}
                                 {drivers.filter(d => d.name.toLowerCase().includes(order.driverName.toLowerCase())).length === 0 && (
-                                  <li className="px-4 py-3 text-xs text-zinc-550 text-center">
+                                  <li className="px-4 py-3 text-xs text-zinc-300 text-center">
                                     No matching driver. Click the <span className="text-purple-400 font-semibold">+</span> button to add.
                                   </li>
                                 )}
@@ -1622,18 +1977,18 @@ export default function CreateOrderModal({ isOpen, onClose }) {
                           
                           {/* Vehicle Dropdown */}
                           {order.showVehicleDropdown && (
-                            <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-950/75 border border-zinc-800/80 rounded-xl shadow-xl z-50 max-h-[160px] overflow-y-auto custom-product-dropdown-scroll backdrop-blur-md">
-                              <ul className="divide-y divide-zinc-900/50">
+                            <div className="absolute left-0 right-0 top-full mt-2 bg-gradient-to-b from-white/[0.14] via-white/[0.06] to-zinc-950/45 border border-white/25 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.3)] z-50 max-h-[180px] overflow-y-auto custom-product-dropdown-scroll backdrop-blur-2xl backdrop-saturate-200 ring-1 ring-white/15">
+                              <ul className="divide-y divide-white/15">
                                 {vehicles
                                   .filter(v => v.plate_number.toLowerCase().replace(/\s+/g, '').includes(order.vehicleNumber.toLowerCase().replace(/\s+/g, '')))
                                   .map(v => (
-                                    <li key={v.id} className="group/item flex items-center justify-between hover:bg-zinc-800/60 transition-colors px-4 py-2.5">
+                                    <li key={v.id} className="group/item flex items-center justify-between hover:bg-white/15 transition-all duration-150 px-4 py-2.5">
                                       <button
                                         type="button"
                                         onClick={() => {
                                           setBatchOrders(prev => prev.map(o => o.id === order.id ? { ...o, vehicleNumber: v.plate_number, showVehicleDropdown: false } : o))
                                         }}
-                                        className="flex-1 text-left text-sm text-zinc-300 hover:text-white transition-colors"
+                                        className="flex-1 text-left text-sm text-zinc-100 group-hover/item:text-white transition-colors font-medium"
                                       >
                                         {v.plate_number}
                                       </button>
@@ -1645,7 +2000,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
                                             setActionItem({ type: 'edit_vehicle', vehicle: v })
                                             setActionInputVal(v.plate_number)
                                           }}
-                                          className="p-1 hover:bg-zinc-700/50 hover:text-amber-400 text-zinc-550 rounded-md transition-colors cursor-pointer"
+                                          className="p-1 hover:bg-white/20 hover:text-amber-300 text-zinc-300 rounded-md transition-colors cursor-pointer"
                                           title="Rename Vehicle"
                                         >
                                           <Edit2 size={13} />
@@ -1656,7 +2011,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
                                             e.stopPropagation()
                                             setActionItem({ type: 'delete_vehicle', vehicle: v })
                                           }}
-                                          className="p-1 hover:bg-zinc-700/50 hover:text-red-400 text-zinc-550 rounded-md transition-colors cursor-pointer"
+                                          className="p-1 hover:bg-white/20 hover:text-red-300 text-zinc-300 rounded-md transition-colors cursor-pointer"
                                           title="Delete Vehicle"
                                         >
                                           <Trash2 size={13} />
@@ -1665,7 +2020,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
                                     </li>
                                   ))}
                                 {vehicles.filter(v => v.plate_number.toLowerCase().replace(/\s+/g, '').includes(order.vehicleNumber.toLowerCase().replace(/\s+/g, ''))).length === 0 && (
-                                  <li className="px-4 py-3 text-xs text-zinc-550 text-center">
+                                  <li className="px-4 py-3 text-xs text-zinc-300 text-center">
                                     No matching vehicle. Click the <span className="text-purple-400 font-semibold">+</span> button to add.
                                   </li>
                                 )}
@@ -1857,6 +2212,8 @@ export default function CreateOrderModal({ isOpen, onClose }) {
             </button>
           </div>
         </div>
+        </>
+        )}
         </>
         )}
       </div>

@@ -25,10 +25,7 @@ def get_dashboard_metrics(
     thirty_days_ago_local = today_start_local - timedelta(days=30)
     
     all_orders_raw = db.query(Order).filter(Order.is_deleted == False).options(
-        joinedload(Order.customer),
-        joinedload(Order.source_store),
-        joinedload(Order.destination_store),
-        joinedload(Order.line_items).joinedload(OrderLineItem.product)
+        joinedload(Order.customer)
     ).all()
     
     from routes.global_analytics import _is_transfer
