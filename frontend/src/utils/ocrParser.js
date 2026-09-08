@@ -322,33 +322,22 @@ export function parseDocumentText(rawText) {
   }
 
   // ── Extract Product Table Rows ──
-  // The table has columns: Sr.No | Description | Unit | Qty(Kg) | Qty(Bag) | Rate | Rate/Unit | Disc(%) | Amount
-  // We look for lines that have a product description followed by numeric values
-
   const productLines = []
   let inTable = false
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
-    // Detect table header
-    if (/Sr\.?\s*No/i.test(line) && /Description/i.test(line)) {
+    // Detect table header (flexible check across split header lines)
+    if (!inTable && (/Description/i.test(line) || (/Sr\.?\s*No/i.test(line) || /Qty/i.test(line) || /Rate/i.test(line)))) {
       inTable = true
       continue
     }
 
-    if (!inTable) continue
-
-    // Stop at total/footer lines
     if (/^\s*(Total|Grand\s*Total|Sub\s*Total|Net\s*Amount|DIVERSAY|Checked|Authorized|CHECKED)/i.test(line)) {
-      break
+      if (inTable && productLines.length > 0) break
     }
 
-    // Try to parse a product row:
-    // Pattern: optional number, product name, then numeric fields
-    // Example: "1  WYLDOX TABLET 10GRM[JSR/STR/9510]  Pcs  400.000  400  1,000.00  Pcs  0.00  400,000.00"
-
-    // Strategy: find lines with at least one number and "Pcs" or "Bag" or "Kg" unit
     const hasUnit = /\b(Pcs|Bag|Bags|Kg|Kgs|Carton|Cartons|Ctns?)\b/i.test(line)
     const hasNumbers = /\d+[,.]?\d*/.test(line)
 
@@ -357,19 +346,20 @@ export function parseDocumentText(rawText) {
       if (parsed) {
         productLines.push(parsed)
       }
-    } else if (line.length > 3 && !line.match(/^\s*\d+\s*$/) && productLines.length > 0) {
-      // Could be a continuation line (e.g., expiry date) — append to last product's description
-      const lastProduct = productLines[productLines.length - 1]
-      if (line.match(/\(\d{1,2}\/\d{1,2}\/\d{2,4}\)/)) {
-        // It's an expiry/batch date, skip it
-        continue
-      }
-      // Check if it has numbers that could be a product row split across lines
-      if (hasNumbers && line.match(/\d{2,}/)) {
-        // Could be the numeric part of a split product row
-        const numericParsed = parseNumericSuffix(line, lastProduct)
-        if (numericParsed) {
-          productLines[productLines.length - 1] = numericParsed
+    }
+  }
+
+  // Fallback: if table header wasn't detected cleanly, scan all lines for product rows
+  if (productLines.length === 0) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      if (/Buyer\s*Details/i.test(line) || /Sale\s*Invoice/i.test(line)) continue
+      const hasUnit = /\b(Pcs|Bag|Bags|Kg|Kgs|Carton|Cartons|Ctns?)\b/i.test(line)
+      const hasNumbers = /\d+[,.]?\d*/.test(line)
+      if (hasUnit && hasNumbers) {
+        const parsed = parseProductLine(line)
+        if (parsed) {
+          productLines.push(parsed)
         }
       }
     }
@@ -399,8 +389,8 @@ function parseProductLine(line) {
   let productName = cleaned.substring(0, unitIdx).trim()
   const afterUnit = cleaned.substring(unitIdx)
 
-  // Clean up product name — remove batch codes like [JSR/STR/9510]
-  productName = productName.replace(/\[.*?\]/g, '').trim()
+  // Clean up product name — remove batch codes like [JSR/STR/9510] and pipes/separators
+  productName = productName.replace(/\[.*?\]/g, '').replace(/[|;:\&]/g, '').trim()
   // Remove trailing parenthetical dates like (15/10/2025)
   productName = productName.replace(/\(\d{1,2}\/\d{1,2}\/\d{2,4}\)\s*$/, '').trim()
 

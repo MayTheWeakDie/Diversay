@@ -114,10 +114,10 @@ export default function ScanUploadPage() {
             waybill_number_full: result.waybill_number_full,
             brand: result.brand,
             date: result.date,
-            customer_name: result.parsed?.customer_name || '',
+            customer_name: result.parsed?.customer_name || result.customer?.name || '',
             customer_location: result.customer_location || '',
             customer_contact: result.customer_contact || '',
-            products: result.parsed?.products || []
+            products: (result.products && result.products.length > 0) ? result.products : (result.parsed?.products || [])
           }
         })
       })
