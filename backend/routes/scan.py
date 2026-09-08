@@ -11,6 +11,8 @@ Flow:
 import uuid
 import time
 import threading
+import json
+import sys
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
@@ -126,6 +128,20 @@ def submit_scan_result(session_id: str, payload: ScanResultSubmit):
         _sessions[session_id]["status"] = "completed"
         _sessions[session_id]["data"] = payload.extracted_data
 
+    # Log clearly for Render application logs
+    try:
+        data = payload.extracted_data or {}
+        print(f"\n======================================================================", flush=True)
+        print(f"🔍 [OCR SUBMITTED] Session ID: {session_id}", flush=True)
+        print(f"CUSTOMER: {data.get('customer_name')}", flush=True)
+        print(f"INVOICE NO: {data.get('invoice_number')}", flush=True)
+        print(f"WAYBILL NO: {data.get('waybill_number')}", flush=True)
+        print(f"PRODUCTS: {json.dumps(data.get('products', []), indent=2)}", flush=True)
+        print(f"FULL PAYLOAD: {json.dumps(data, indent=2)}", flush=True)
+        print(f"======================================================================\n", flush=True)
+    except Exception as e:
+        print(f"[OCR LOGGING ERROR]: {e}", flush=True)
+
     return {"message": "Scan result submitted successfully."}
 
 
@@ -147,7 +163,12 @@ def poll_scan_result(session_id: str):
             _sessions.pop(session_id, None)
         return ScanSessionStatusResponse(status="expired", data=None)
 
+    if session["status"] == "completed":
+        cust = (session.get("data") or {}).get("customer_name", "Unknown")
+        print(f"📡 [OCR POLLED - COMPLETED] Session: {session_id} serving data for customer: {cust}", flush=True)
+
     return ScanSessionStatusResponse(
         status=session["status"],
         data=session["data"]
     )
+
