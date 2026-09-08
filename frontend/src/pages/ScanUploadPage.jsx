@@ -3,7 +3,9 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { processDocumentImage, terminateWorker } from '../utils/ocrParser'
 import api from '../services/api'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_URL = (import.meta.env.VITE_API_URL && !import.meta.env.VITE_API_URL.includes('localhost'))
+  ? import.meta.env.VITE_API_URL
+  : `${window.location.protocol}//${window.location.hostname}:8000`
 
 /**
  * ScanUploadPage — Mobile-optimized, standalone page for scanning documents via QR code.

@@ -135,11 +135,15 @@ export async function extractTextFromImage(imageSource, onProgress) {
   // If it's a File/Blob, load it as an image first for preprocessing
   let processedSource = imageSource
 
-  if (imageSource instanceof File || imageSource instanceof Blob) {
+  if (typeof File !== 'undefined' && imageSource instanceof File) {
     const img = await loadImageFromBlob(imageSource)
     const canvas = preprocessImage(img)
     processedSource = canvas
-  } else if (imageSource instanceof HTMLImageElement) {
+  } else if (typeof Blob !== 'undefined' && imageSource instanceof Blob) {
+    const img = await loadImageFromBlob(imageSource)
+    const canvas = preprocessImage(img)
+    processedSource = canvas
+  } else if (typeof HTMLImageElement !== 'undefined' && imageSource instanceof HTMLImageElement) {
     const canvas = preprocessImage(imageSource)
     processedSource = canvas
   }
@@ -338,13 +342,23 @@ export function parseDocumentText(rawText) {
       if (inTable && productLines.length > 0) break
     }
 
-    const hasUnit = /\b(Pcs|Bag|Bags|Kg|Kgs|Carton|Cartons|Ctns?)\b/i.test(line)
+    const hasUnit = /\b(Pcs|Bag|Bags|Kg|Kgs|Carton|Cartons|Ctns?|Bott|Bottle|Bottles|Litr|Ltr|Ltrs|Lit|Pack|Pks?|Packs?|Units?)\b/i.test(line)
     const hasNumbers = /\d+[,.]?\d*/.test(line)
 
     if (hasUnit && hasNumbers) {
       const parsed = parseProductLine(line)
       if (parsed) {
         productLines.push(parsed)
+      } else if (productLines.length > 0) {
+        const merged = parseNumericSuffix(line, productLines[productLines.length - 1])
+        if (merged) {
+          productLines[productLines.length - 1] = merged
+        }
+      }
+    } else if (!hasUnit && hasNumbers && inTable && productLines.length > 0) {
+      const merged = parseNumericSuffix(line, productLines[productLines.length - 1])
+      if (merged) {
+        productLines[productLines.length - 1] = merged
       }
     }
   }
@@ -354,12 +368,22 @@ export function parseDocumentText(rawText) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
       if (/Buyer\s*Details/i.test(line) || /Sale\s*Invoice/i.test(line)) continue
-      const hasUnit = /\b(Pcs|Bag|Bags|Kg|Kgs|Carton|Cartons|Ctns?)\b/i.test(line)
+      const hasUnit = /\b(Pcs|Bag|Bags|Kg|Kgs|Carton|Cartons|Ctns?|Bott|Bottle|Bottles|Litr|Ltr|Ltrs|Lit|Pack|Pks?|Packs?|Units?)\b/i.test(line)
       const hasNumbers = /\d+[,.]?\d*/.test(line)
       if (hasUnit && hasNumbers) {
         const parsed = parseProductLine(line)
         if (parsed) {
           productLines.push(parsed)
+        } else if (productLines.length > 0) {
+          const merged = parseNumericSuffix(line, productLines[productLines.length - 1])
+          if (merged) {
+            productLines[productLines.length - 1] = merged
+          }
+        }
+      } else if (!hasUnit && hasNumbers && productLines.length > 0) {
+        const merged = parseNumericSuffix(line, productLines[productLines.length - 1])
+        if (merged) {
+          productLines[productLines.length - 1] = merged
         }
       }
     }
@@ -378,57 +402,56 @@ export function parseDocumentText(rawText) {
  * @returns {object|null} - { name, unit, quantity, rate, amount } or null
  */
 function parseProductLine(line) {
-  // Remove leading serial number (e.g., "1 ", "2 ")
-  let cleaned = line.replace(/^\s*\d+\s+/, '')
+  // Remove leading serial number (e.g., "1 ", "2 ", "1 | ", "2 | ")
+  let cleaned = line.replace(/^\s*\d+\s*[|]?\s*/, '')
 
-  // Strategy: split on the first occurrence of a unit keyword to separate name from numbers
-  const unitMatch = cleaned.match(/\b(Pcs|Bag|Bags|Kg|Kgs|Carton|Cartons|Ctns?)\b/i)
+  const unitMatch = cleaned.match(/\b(Pcs|Bag|Bags|Kg|Kgs|Carton|Cartons|Ctns?|Bott|Bottle|Bottles|Litr|Ltr|Ltrs|Lit|Pack|Pks?|Packs?|Units?)\b/i)
   if (!unitMatch) return null
 
   const unitIdx = cleaned.indexOf(unitMatch[0])
   let productName = cleaned.substring(0, unitIdx).trim()
   const afterUnit = cleaned.substring(unitIdx)
 
-  // Clean up product name — remove batch codes like [JSR/STR/9510] and pipes/separators
-  productName = productName.replace(/\[.*?\]/g, '').replace(/[|;:\&]/g, '').trim()
+  // Clean up product name — strip batch codes like [JSR/STR/9510 (with or without closing bracket) and pipes/separators
+  productName = productName.split('[')[0].replace(/[|;:\&]/g, '').trim()
   // Remove trailing parenthetical dates like (15/10/2025)
-  productName = productName.replace(/\(\d{1,2}\/\d{1,2}\/\d{2,4}\)\s*$/, '').trim()
+  productName = productName.replace(/\(.*?\)/g, '').trim()
 
   if (!productName || productName.length < 2) return null
+
+  // Ignore header rows mistakenly matched
+  if (/^(Description|Item|Product|Sr|No|Unit|Qty|Rate|Amount)$/i.test(productName)) return null
+
+  // A valid product name must contain at least one letter (a-z) to avoid capturing fragmented numeric lines
+  if (!/[a-zA-Z]/.test(productName)) return null
 
   // Extract all numbers from the remainder
   const numbers = afterUnit.match(/[\d,]+\.?\d*/g) || []
   const parsedNumbers = numbers.map(n => parseFloat(n.replace(/,/g, ''))).filter(n => !isNaN(n))
 
-  // Map unit
-  let unit = 'Pieces'
-  const unitLower = unitMatch[0].toLowerCase()
-  if (unitLower === 'bag' || unitLower === 'bags') unit = 'Carton'
-  if (unitLower === 'carton' || unitLower === 'cartons' || unitLower.startsWith('ctn')) unit = 'Carton'
+  // Map unit — backend architecture requires all unit types to be saved as Pieces
+  const unit = 'Pieces'
 
   // Determine quantity — typically the Qty(Bag) or Qty(Kg) column
-  // The numbers usually go: Qty(Kg), Qty(Bag), Rate, Rate/Unit discount, Amount
-  let quantity = 0
+  let quantity = 1
   let rate = 0
   let amount = 0
 
   if (parsedNumbers.length >= 3) {
-    // Pattern: qty_kg, qty_bag, rate, ..., amount
-    // We want qty_bag (second number) as that's the actual piece/bag count
-    quantity = parsedNumbers[1] || parsedNumbers[0]
+    quantity = parsedNumbers[1] || parsedNumbers[0] || 1
     rate = parsedNumbers[2] || 0
     amount = parsedNumbers[parsedNumbers.length - 1] || 0
   } else if (parsedNumbers.length === 2) {
-    quantity = parsedNumbers[0]
-    amount = parsedNumbers[1]
+    quantity = parsedNumbers[0] || 1
+    amount = parsedNumbers[1] || 0
   } else if (parsedNumbers.length === 1) {
-    quantity = parsedNumbers[0]
+    quantity = parsedNumbers[0] || 1
   }
 
   return {
     name: productName,
     unit,
-    quantity,
+    quantity: Math.max(1, Math.round(quantity)),
     rate,
     amount
   }

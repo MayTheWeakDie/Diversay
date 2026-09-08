@@ -443,15 +443,42 @@ export default function CreateOrderModal({ isOpen, onClose }) {
       const centralStoreIdStr = centralStore ? centralStore.id.toString() : ''
       setCentralStoreId(centralStoreIdStr)
 
-      // Initialize searchQuery for line items if pre-selected, and also resolve customer search typed during load
+      // Initialize searchQuery for line items if pre-selected, and resolve customer/product matches if data arrived before DB load
       setBatchOrders(prevOrders => prevOrders.map(order => {
+        let customerId = order.customerId
+        let customerState = order.customerState
+        let customerCity = order.customerCity
+        if (!customerId && order.customerSearchQuery && fetchedCustomers.length > 0) {
+          const cRes = fuzzyMatch(order.customerSearchQuery, fetchedCustomers.map(c => ({ id: c.id, name: c.name })))
+          if (cRes.match) {
+            const foundC = fetchedCustomers.find(c => c.id === cRes.match.id)
+            if (foundC) {
+              customerId = foundC.id.toString()
+              customerState = foundC.state || ''
+              customerCity = foundC.city || ''
+            }
+          }
+        }
+
         const updatedWaybills = order.waybills ? order.waybills.map(wb => {
           const updatedLineItems = wb.lineItems ? wb.lineItems.map(item => {
-            if (item.product_id && !item.searchQuery) {
-              const prod = fetchedProducts.find(p => p.id === parseInt(item.product_id))
-              return { ...item, searchQuery: prod ? prod.name : '' }
+            let prodId = item.product_id
+            let q = item.searchQuery
+            if (!prodId && item.searchQuery && fetchedProducts.length > 0) {
+              const cleanSearch = item.searchQuery.split('[')[0].replace(/[|;:\&]/g, '').trim()
+              const pRes = fuzzyMatch(cleanSearch, fetchedProducts.map(p => ({ id: p.id, name: p.name })))
+              if (pRes.match) {
+                const foundP = fetchedProducts.find(p => p.id === pRes.match.id)
+                if (foundP) {
+                  prodId = foundP.id.toString()
+                  q = foundP.name
+                }
+              }
+            } else if (prodId && !item.searchQuery) {
+              const prod = fetchedProducts.find(p => p.id === parseInt(prodId))
+              if (prod) q = prod.name
             }
-            return item
+            return { ...item, product_id: prodId, searchQuery: q }
           }) : []
           return { ...wb, lineItems: updatedLineItems }
         }) : []
@@ -463,6 +490,9 @@ export default function CreateOrderModal({ isOpen, onClose }) {
 
         return {
           ...order,
+          customerId,
+          customerState,
+          customerCity,
           sourceStoreId: order.sourceStoreId || centralStoreIdStr,
           waybills: updatedWaybills,
           matchingCustomers: matched.slice(0, 4),
@@ -829,7 +859,8 @@ export default function CreateOrderModal({ isOpen, onClose }) {
         const scannedProducts = scanData.products || scanData.line_items || []
         if (Array.isArray(scannedProducts) && scannedProducts.length > 0) {
           const matchedLineItems = scannedProducts.map(sp => {
-            const prodName = (sp.name || sp.description || sp.product_name || '').trim()
+            const rawProdName = (sp.name || sp.description || sp.product_name || '').trim()
+            const prodName = rawProdName.split('[')[0].replace(/[|;:\&]/g, '').trim()
             let matchedProd = null
             if (prodName && currentProducts.length > 0) {
               const pRes = fuzzyMatch(prodName, currentProducts.map(p => ({ id: p.id, name: p.name })))
@@ -839,8 +870,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
             }
 
             const rawQty = sp.quantity || sp.qty || sp.qty_bags || sp.qty_kg || 1
-            const unitStr = (sp.unit || 'Cartons').toLowerCase().includes('carton') ? 'Cartons' : 
-                            (sp.unit || '').toLowerCase().includes('piece') ? 'Pieces' : 'Cartons'
+            const unitStr = 'Pieces' // Backend architecture requires all units to be saved as Pieces
 
             return {
               id: Math.random().toString(36).substr(2, 9),
