@@ -131,6 +131,16 @@ export default function CreateOrderModal({ isOpen, onClose }) {
   const pollTimerRef = useRef(null)
   const [scanDataApplied, setScanDataApplied] = useState(false)
 
+  const customersRef = useRef(customers)
+  const productsRef = useRef(products)
+  const driversRef = useRef(drivers)
+  const vehiclesRef = useRef(vehicles)
+
+  useEffect(() => { customersRef.current = customers }, [customers])
+  useEffect(() => { productsRef.current = products }, [products])
+  useEffect(() => { driversRef.current = drivers }, [drivers])
+  useEffect(() => { vehiclesRef.current = vehicles }, [vehicles])
+
   const handleOpenQuickCustomerModal = (orderId, initialName = '') => {
     setQuickCustomerModal({
       isOpen: true,
@@ -746,6 +756,116 @@ export default function CreateOrderModal({ isOpen, onClose }) {
   // ─── Scan Mode Functions ──────────────────────────────────────────────────
   const FRONTEND_URL = window.location.origin
 
+  const applyScanDataToForm = useCallback((scanData) => {
+    if (!scanData) return
+
+    const currentCustomers = customersRef.current || []
+    const currentProducts = productsRef.current || []
+
+    setBatchOrders(prev => {
+      if (!prev || prev.length === 0) return prev
+
+      const order = { ...prev[0] }
+
+      // 1. Customer Name
+      const rawCustomerName = (scanData.customer_name || scanData.customer || '').trim()
+      if (rawCustomerName) {
+        order.customerSearchQuery = rawCustomerName
+        if (currentCustomers.length > 0) {
+          const customerResult = fuzzyMatch(
+            rawCustomerName,
+            currentCustomers.map(c => ({ id: c.id, name: c.name }))
+          )
+          if (customerResult.match) {
+            const matchedCustomer = currentCustomers.find(c => c.id === customerResult.match.id)
+            if (matchedCustomer) {
+              order.customerId = matchedCustomer.id.toString()
+              order.customerSearchQuery = matchedCustomer.name
+              order.customerState = matchedCustomer.state || ''
+              order.customerCity = matchedCustomer.city || ''
+              order.showCustomerDropdown = false
+              order.matchingCustomers = []
+            }
+          } else {
+            order.customerId = ''
+            order.matchingCustomers = searchCustomersLocally(rawCustomerName, currentCustomers).slice(0, 4)
+            order.showCustomerDropdown = false
+          }
+        } else {
+          order.customerId = ''
+          order.showCustomerDropdown = false
+        }
+      }
+
+      // 2. Driver & Vehicle
+      const rawDriver = (scanData.driver_name || scanData.driver || '').trim()
+      if (rawDriver) {
+        order.driverName = rawDriver
+        order.showDriverDropdown = false
+      }
+
+      const rawVehicle = (scanData.vehicle_number || scanData.vehicle || scanData.plate_number || '').trim()
+      if (rawVehicle) {
+        order.vehicleNumber = rawVehicle
+        order.showVehicleDropdown = false
+      }
+
+      // 3. Invoice & Waybill Reference Cards
+      const brand = scanData.brand || 'DSL'
+      if (order.waybills && order.waybills.length > 0) {
+        const wb = { ...order.waybills[0] }
+        wb.brand = brand
+
+        // Clean prefixes if present
+        let rawInv = (scanData.invoice_number || scanData.invoice_number_full || scanData.invoice_no || '').trim()
+        rawInv = rawInv.replace(/^DSL\/SA\//i, '').replace(/^DSLP\/SA\//i, '').trim()
+        if (rawInv) wb.invoiceNumber = rawInv
+
+        let rawWb = (scanData.waybill_number || scanData.waybill_number_full || scanData.waybill_no || '').trim()
+        rawWb = rawWb.replace(/^DSL\/DLN\//i, '').replace(/^DSLP\/DLN\//i, '').trim()
+        if (rawWb) wb.waybillNumber = rawWb
+
+        // 4. Products / Line Items
+        const scannedProducts = scanData.products || scanData.line_items || []
+        if (Array.isArray(scannedProducts) && scannedProducts.length > 0) {
+          const matchedLineItems = scannedProducts.map(sp => {
+            const prodName = (sp.name || sp.description || sp.product_name || '').trim()
+            let matchedProd = null
+            if (prodName && currentProducts.length > 0) {
+              const pRes = fuzzyMatch(prodName, currentProducts.map(p => ({ id: p.id, name: p.name })))
+              if (pRes.match) {
+                matchedProd = currentProducts.find(p => p.id === pRes.match.id)
+              }
+            }
+
+            const rawQty = sp.quantity || sp.qty || sp.qty_bags || sp.qty_kg || 1
+            const unitStr = (sp.unit || 'Cartons').toLowerCase().includes('carton') ? 'Cartons' : 
+                            (sp.unit || '').toLowerCase().includes('piece') ? 'Pieces' : 'Cartons'
+
+            return {
+              id: Math.random().toString(36).substr(2, 9),
+              product_id: matchedProd ? matchedProd.id.toString() : '',
+              quantity: parseInt(rawQty) || 1,
+              unit: unitStr,
+              searchQuery: matchedProd ? matchedProd.name : prodName
+            }
+          })
+
+          if (matchedLineItems.length > 0) {
+            wb.lineItems = matchedLineItems
+          }
+        }
+
+        order.waybills = [wb, ...order.waybills.slice(1)]
+      }
+
+      return [order, ...prev.slice(1)]
+    })
+
+    setScanDataApplied(true)
+    setOrderCreationMode('manual')
+  }, [])
+
   const startScanSession = useCallback(async () => {
     try {
       setScanStatus('waiting')
@@ -785,77 +905,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
       setScanStatus('error')
       setScanStatusMessage('Failed to start scan session. Please try again.')
     }
-  }, [])
-
-  const applyScanDataToForm = useCallback((scanData) => {
-    // scanData contains: customer_name, invoice_number, waybill_number, brand, date, products, etc.
-    setBatchOrders(prev => {
-      const order = { ...prev[0] } // Apply to the first (and usually only) order
-
-      // 1. Match customer by name
-      if (scanData.customer_name && customers.length > 0) {
-        const customerResult = fuzzyMatch(
-          scanData.customer_name,
-          customers.map(c => ({ id: c.id, name: c.name }))
-        )
-        if (customerResult.match) {
-          const matchedCustomer = customers.find(c => c.id === customerResult.match.id)
-          if (matchedCustomer) {
-            order.customerId = matchedCustomer.id.toString()
-            order.customerSearchQuery = matchedCustomer.name
-            order.customerState = matchedCustomer.state || ''
-            order.customerCity = matchedCustomer.city || ''
-            order.showCustomerDropdown = false
-            order.matchingCustomers = []
-          }
-        } else {
-          // No match — put the OCR name in the search field so user can pick manually
-          order.customerSearchQuery = scanData.customer_name
-          order.matchingCustomers = searchCustomersLocally(scanData.customer_name, customers).slice(0, 4)
-          order.showCustomerDropdown = true
-        }
-      }
-
-      // 2. Fill waybill/invoice on the first reference card
-      const brand = scanData.brand || 'DSL'
-      if (order.waybills && order.waybills.length > 0) {
-        const wb = { ...order.waybills[0] }
-        wb.brand = brand
-        if (scanData.waybill_number) {
-          wb.waybillNumber = scanData.waybill_number
-        }
-        if (scanData.invoice_number) {
-          wb.invoiceNumber = scanData.invoice_number
-        }
-
-        // 3. Match products
-        if (scanData.products && scanData.products.length > 0 && products.length > 0) {
-          const matchedLineItems = scanData.products.map(scannedProduct => {
-            const productResult = fuzzyMatch(
-              scannedProduct.name,
-              products.map(p => ({ id: p.id, name: p.name }))
-            )
-            const matchedProd = productResult.match ? products.find(p => p.id === productResult.match.id) : null
-            return {
-              product_id: matchedProd ? matchedProd.id.toString() : '',
-              quantity: scannedProduct.quantity || 1,
-              unit: scannedProduct.unit === 'Carton' ? 'Cartons' : 'Pieces',
-              searchQuery: matchedProd ? matchedProd.name : scannedProduct.name
-            }
-          })
-          wb.lineItems = matchedLineItems.length > 0 ? matchedLineItems : wb.lineItems
-        }
-
-        order.waybills = [wb, ...order.waybills.slice(1)]
-      }
-
-      return [order, ...prev.slice(1)]
-    })
-
-    setScanDataApplied(true)
-    // Switch to manual mode so user can review the auto-filled form
-    setOrderCreationMode('manual')
-  }, [customers, products])
+  }, [applyScanDataToForm])
 
   const cancelScanSession = useCallback(() => {
     if (pollTimerRef.current) {
