@@ -496,7 +496,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
           sourceStoreId: order.sourceStoreId || centralStoreIdStr,
           waybills: updatedWaybills,
           matchingCustomers: matched.slice(0, 4),
-          showCustomerDropdown: order.customerSearchQuery ? true : order.showCustomerDropdown
+          showCustomerDropdown: customerId ? false : (order.customerSearchQuery ? true : order.showCustomerDropdown)
         }
       }))
     } catch (err) {
@@ -789,6 +789,8 @@ export default function CreateOrderModal({ isOpen, onClose }) {
   const applyScanDataToForm = useCallback((scanData) => {
     if (!scanData) return
 
+    const actualData = scanData.extracted_data || scanData.data || scanData
+
     const currentCustomers = customersRef.current || []
     const currentProducts = productsRef.current || []
 
@@ -798,7 +800,14 @@ export default function CreateOrderModal({ isOpen, onClose }) {
       const order = { ...prev[0] }
 
       // 1. Customer Name
-      const rawCustomerName = (scanData.customer_name || scanData.customer || '').trim()
+      const rawCustomerName = (
+        actualData.customer_name ||
+        actualData.customer?.name ||
+        actualData.customer ||
+        actualData.parsed?.customer_name ||
+        ''
+      ).trim()
+
       if (rawCustomerName) {
         order.customerSearchQuery = rawCustomerName
         if (currentCustomers.length > 0) {
@@ -828,39 +837,51 @@ export default function CreateOrderModal({ isOpen, onClose }) {
       }
 
       // 2. Driver & Vehicle
-      const rawDriver = (scanData.driver_name || scanData.driver || '').trim()
+      const rawDriver = (actualData.driver_name || actualData.driver || '').trim()
       if (rawDriver) {
         order.driverName = rawDriver
         order.showDriverDropdown = false
       }
 
-      const rawVehicle = (scanData.vehicle_number || scanData.vehicle || scanData.plate_number || '').trim()
+      const rawVehicle = (actualData.vehicle_number || actualData.vehicle || actualData.plate_number || '').trim()
       if (rawVehicle) {
         order.vehicleNumber = rawVehicle
         order.showVehicleDropdown = false
       }
 
       // 3. Invoice & Waybill Reference Cards
-      const brand = scanData.brand || 'DSL'
+      const brand = actualData.brand || actualData.parsed?.brand || 'DSL'
       if (order.waybills && order.waybills.length > 0) {
         const wb = { ...order.waybills[0] }
         wb.brand = brand
 
         // Clean prefixes if present
-        let rawInv = (scanData.invoice_number || scanData.invoice_number_full || scanData.invoice_no || '').trim()
+        let rawInv = (
+          actualData.invoice_number ||
+          actualData.invoice_number_full ||
+          actualData.invoice_no ||
+          actualData.parsed?.invoice_number ||
+          ''
+        ).trim()
         rawInv = rawInv.replace(/^DSL\/SA\//i, '').replace(/^DSLP\/SA\//i, '').trim()
         if (rawInv) wb.invoiceNumber = rawInv
 
-        let rawWb = (scanData.waybill_number || scanData.waybill_number_full || scanData.waybill_no || '').trim()
+        let rawWb = (
+          actualData.waybill_number ||
+          actualData.waybill_number_full ||
+          actualData.waybill_no ||
+          actualData.parsed?.waybill_number ||
+          ''
+        ).trim()
         rawWb = rawWb.replace(/^DSL\/DLN\//i, '').replace(/^DSLP\/DLN\//i, '').trim()
         if (rawWb) wb.waybillNumber = rawWb
 
         // 4. Products / Line Items
-        const scannedProducts = scanData.products || scanData.line_items || []
+        const scannedProducts = actualData.products || actualData.line_items || actualData.parsed?.products || []
         if (Array.isArray(scannedProducts) && scannedProducts.length > 0) {
           const matchedLineItems = scannedProducts.map(sp => {
-            const rawProdName = (sp.name || sp.description || sp.product_name || '').trim()
-            const prodName = rawProdName.split('[')[0].replace(/[|;:\&]/g, '').trim()
+            const rawProdName = (sp.name || sp.description || sp.product_name || sp.ocr_name || '').trim()
+            const prodName = rawProdName.split('[')[0].replace(/^[^a-zA-Z0-9]+/, '').replace(/[|;:\&]/g, '').trim()
             let matchedProd = null
             if (prodName && currentProducts.length > 0) {
               const pRes = fuzzyMatch(prodName, currentProducts.map(p => ({ id: p.id, name: p.name })))
