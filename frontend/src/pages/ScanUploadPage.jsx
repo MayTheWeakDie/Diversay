@@ -102,6 +102,11 @@ export default function ScanUploadPage() {
           setError('This scan session has expired. Please generate a new QR code.')
           return
         }
+        if (response.status === 503) {
+          setStatus('error')
+          setError('The AI model is temporarily busy. Please tap "Process Document" again in a few seconds.')
+          return
+        }
         throw new Error(errData.detail || 'Failed to process document image.')
       }
       
@@ -113,6 +118,7 @@ export default function ScanUploadPage() {
       setError(err.message || 'Failed to process document image. Please try again.')
     }
   }, [imageFile, sessionId, secret])
+
 
   
   const handleRetry = useCallback(() => {

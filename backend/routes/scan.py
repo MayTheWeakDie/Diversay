@@ -179,10 +179,19 @@ def poll_scan_result(session_id: str):
 
 
 # ─── Gemini AI Vision Processing ──────────────────────────────────────────────
+# Model waterfall: tries least-demanded model first, escalates on 503.
+# gemini-2.5-flash-lite has the highest free RPD quota and fewest 503s.
+_GEMINI_MODELS = [
+    "gemini-2.5-flash-lite",   # Primary: highest free quota, least demand
+    "gemini-3.1-flash-lite",   # Secondary: free tier, lower traffic than 3.6
+    "gemini-3.6-flash",        # Tertiary: fallback (our original model)
+]
+
 def _process_image_with_gemini(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     """
-    Ingest document image bytes, call Gemini 3.6 Flash multimodal vision,
-    and parse structured invoice/waybill JSON.
+    Ingest document image bytes, call Gemini multimodal vision, and parse structured JSON.
+    Tries models in order of least demand → most capable.
+    On 503 (model overloaded), moves to the next model in the waterfall.
     """
     settings = get_settings()
     api_key = settings.GEMINI_API_KEY
@@ -217,14 +226,14 @@ Extract the structured data into JSON with the following exact format:
 Return ONLY valid JSON matching this schema, with no Markdown code block wrappers or extra text.
 """
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
+    safe_mime = mime_type if mime_type in ["image/jpeg", "image/jpg", "image/png", "image/webp"] else "image/jpeg"
     payload = {
         "contents": [{
             "parts": [
                 {"text": prompt},
                 {
                     "inline_data": {
-                        "mime_type": mime_type if mime_type in ["image/jpeg", "image/jpg", "image/png", "image/webp"] else "image/jpeg",
+                        "mime_type": safe_mime,
                         "data": base64_image
                     }
                 }
@@ -234,34 +243,54 @@ Return ONLY valid JSON matching this schema, with no Markdown code block wrapper
             "response_mime_type": "application/json"
         }
     }
+    payload_bytes = json.dumps(payload).encode("utf-8")
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST"
+    last_error = None
+    for model in _GEMINI_MODELS:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        req = urllib.request.Request(
+            url,
+            data=payload_bytes,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        try:
+            print(f"[GEMINI VISION] Trying model: {model}", flush=True)
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                resp_body = resp.read().decode("utf-8")
+                data = json.loads(resp_body)
+                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                result = json.loads(raw_text)
+                print(f"[GEMINI VISION] Success with model: {model}", flush=True)
+                return result
+
+        except urllib.error.HTTPError as e:
+            err_msg = e.read().decode("utf-8")
+            print(f"[GEMINI VISION] {model} → HTTP {e.code}: {err_msg[:200]}", flush=True)
+
+            if e.code in (503, 429):
+                # Model overloaded or rate-limited — try next model in waterfall
+                last_error = e.code
+                continue
+
+            # Non-transient error (400, 401, 404 etc) — fail immediately
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Gemini AI Vision error ({model}): HTTP {e.code}"
+            )
+
+        except Exception as e:
+            print(f"[GEMINI VISION] {model} → Exception: {e}", flush=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to process image with Gemini AI Vision: {str(e)}"
+            )
+
+    # All models exhausted
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="All Gemini AI Vision models are temporarily overloaded. Please retry in a few seconds."
     )
-
-    try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
-            resp_body = resp.read().decode("utf-8")
-            data = json.loads(resp_body)
-            raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-            parsed_json = json.loads(raw_text)
-            return parsed_json
-    except urllib.error.HTTPError as e:
-        err_msg = e.read().decode("utf-8")
-        print(f"[GEMINI VISION HTTP ERROR]: {e.code} - {err_msg}", flush=True)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Gemini AI Vision processing failed: {e.code}"
-        )
-    except Exception as e:
-        print(f"[GEMINI VISION ERROR]: {e}", flush=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process image with Gemini AI Vision: {str(e)}"
-        )
 
 
 @router.post("/{session_id}/process-image", status_code=status.HTTP_200_OK)
