@@ -62,9 +62,9 @@ class TestScanVisionAPI(unittest.TestCase):
         res0 = asyncio.run(process_scan_image(session_id, f1, session_secret, is_last="true", order_index=0, is_batch_complete="false"))
         self.assertEqual(res0["order_index"], 0)
 
-        # Poll status should be partial
+        # Poll status should be processing
         p1 = poll_scan_result(session_id)
-        self.assertEqual(p1.status, "partial")
+        self.assertEqual(p1.status, "processing")
 
         # Order 1 upload (final item in batch)
         f2 = UploadFile(filename="order1.jpg", file=BytesIO(file_bytes), headers={"content-type": "image/jpeg"})

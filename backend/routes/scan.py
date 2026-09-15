@@ -577,7 +577,8 @@ async def process_scan_image(
         if is_last_flag and is_batch_flag:
             _sessions[session_id]["status"] = "completed"
         else:
-            _sessions[session_id]["status"] = "partial"
+            # Leave as processing for intermediate images so desktop doesn't terminate polling early
+            _sessions[session_id]["status"] = "processing"
 
     print(f"\n======================================================================", flush=True)
     print(f"✨ [GEMINI VISION PROCESSED] Session ID: {session_id} | Order Index: {order_idx} | is_last={is_last} | is_batch_complete={is_batch_complete}", flush=True)
