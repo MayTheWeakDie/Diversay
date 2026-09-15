@@ -2,455 +2,583 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import api from '../services/api'
 
-const API_URL = (import.meta.env.VITE_API_URL && !import.meta.env.VITE_API_URL.includes('localhost'))
-  ? import.meta.env.VITE_API_URL
-  : `${window.location.protocol}//${window.location.hostname}:8000`
+const API_URL = (import.meta.env.VITE_API_URL && !import.meta.env.VITE_API_URL.includes('localhost') && !import.meta.env.VITE_API_URL.includes('127.0.0.1'))
+  ? import.meta.env.VITE_API_URL.replace(/\/$/, '')
+  : window.location.origin
 
-const MAX_IMAGES = 2
-
-/**
- * ScanUploadPage — Mobile-optimized, standalone page for scanning documents via QR code.
- *
- * Supports uploading 1 or 2 images (e.g. two pages of the same invoice).
- * Both camera capture AND gallery/file selection are available.
- * Images are processed sequentially; results are merged server-side.
- */
 export default function ScanUploadPage() {
   const { sessionId } = useParams()
   const [searchParams] = useSearchParams()
-  const secret = searchParams.get('secret') || ''
+  const secret = searchParams.get('secret')
 
-  // Array of { file, preview } — up to MAX_IMAGES
-  const [images, setImages] = useState([])
-  const [status, setStatus] = useState('idle') // idle | processing | success | error | expired
-  const [statusMessage, setStatusMessage] = useState('')
-  const [error, setError] = useState('')
-  const [activeSlot, setActiveSlot] = useState(null) // which slot the input is for (0 | 1)
+  // Array of order items in the batch
+  const [orders, setOrders] = useState([
+    {
+      id: 'order-' + Date.now(),
+      orderIndex: 0,
+      title: 'Order #1',
+      images: [null, null], // Page 1 & Page 2 slots
+      status: 'idle', // 'idle' | 'uploading' | 'scanned' | 'error'
+      data: null,
+      errorMsg: ''
+    }
+  ])
+  const [activeOrderIdx, setActiveOrderIdx] = useState(0)
 
-  const cameraInputRef = useRef(null)
-  const galleryInputRef = useRef(null)
+  // Input refs: map key `orderIdx-slotIdx-type` -> ref
+  const cameraInputRefs = useRef({})
+  const galleryInputRefs = useRef({})
 
-  // Validate session on mount
+  const [sessionValid, setSessionValid] = useState(true)
+  const [sessionChecking, setSessionChecking] = useState(true)
+  const [isSubmittingBatch, setIsSubmittingBatch] = useState(false)
+  const [batchProgressMsg, setBatchProgressMsg] = useState('')
+  const [batchComplete, setBatchComplete] = useState(false)
+  const [globalError, setGlobalError] = useState('')
+
+  // Verify scan session on mount
   useEffect(() => {
     if (!sessionId || !secret) {
-      setStatus('error')
-      setError('Invalid scan link. Please scan the QR code again from the Diversay app.')
+      setSessionValid(false)
+      setSessionChecking(false)
       return
     }
     const checkSession = async () => {
       try {
-        const res = await fetch(`${API_URL}/scan-sessions/${sessionId}/result`)
-        const data = await res.json()
-        if (data.status === 'expired') {
-          setStatus('expired')
-          setError('This scan session has expired. Please generate a new QR code from the Diversay app.')
-        } else if (data.status === 'completed') {
-          setStatus('success')
-          setStatusMessage('Document already processed! You can close this page.')
+        const res = await api.get(`/scan-sessions/${sessionId}/result`)
+        if (res.data.status === 'expired') {
+          setSessionValid(false)
+        } else {
+          setSessionValid(true)
         }
-      } catch { /* non-blocking */ }
+      } catch (err) {
+        console.error('Session validation error:', err)
+        setSessionValid(false)
+      } finally {
+        setSessionChecking(false)
+      }
     }
     checkSession()
   }, [sessionId, secret])
 
-  const openPicker = useCallback((slot, mode) => {
-    setActiveSlot(slot)
-    if (mode === 'camera') {
-      cameraInputRef.current?.click()
-    } else {
-      galleryInputRef.current?.click()
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      orders.forEach(order => {
+        order.images.forEach(img => {
+          if (img && img.preview) URL.revokeObjectURL(img.preview)
+        })
+      })
     }
   }, [])
 
-  const handleFileSelected = useCallback((e) => {
-    const file = e.target.files?.[0]
+  // ── Image Handling Functions ─────────────────────────────────────────────
+  const handleImageSelected = (orderIdx, slotIdx, file) => {
     if (!file) return
-    const preview = URL.createObjectURL(file)
-    setImages(prev => {
-      const next = [...prev]
-      if (activeSlot !== null && activeSlot < next.length) {
-        // Replace existing slot
-        URL.revokeObjectURL(next[activeSlot].preview)
-        next[activeSlot] = { file, preview }
-      } else {
-        next.push({ file, preview })
+    const previewUrl = URL.createObjectURL(file)
+    setOrders(prev => prev.map((ord, idx) => {
+      if (idx !== orderIdx) return ord
+      const newImages = [...ord.images]
+      if (newImages[slotIdx] && newImages[slotIdx].preview) {
+        URL.revokeObjectURL(newImages[slotIdx].preview)
       }
-      return next
+      newImages[slotIdx] = { file, preview: previewUrl, name: file.name }
+      return {
+        ...ord,
+        images: newImages,
+        status: 'idle', // reset scan status when image changes
+        errorMsg: ''
+      }
+    }))
+  }
+
+  const handleRemoveImage = (orderIdx, slotIdx) => {
+    setOrders(prev => prev.map((ord, idx) => {
+      if (idx !== orderIdx) return ord
+      const newImages = [...ord.images]
+      if (newImages[slotIdx] && newImages[slotIdx].preview) {
+        URL.revokeObjectURL(newImages[slotIdx].preview)
+      }
+      newImages[slotIdx] = null
+      return {
+        ...ord,
+        images: newImages,
+        status: 'idle',
+        data: null
+      }
+    }))
+  }
+
+  // ── Batch Order Management ────────────────────────────────────────────────
+  const handleAddOrder = () => {
+    setOrders(prev => {
+      const nextIdx = prev.length
+      const newOrder = {
+        id: 'order-' + Date.now() + '-' + nextIdx,
+        orderIndex: nextIdx,
+        title: `Order #${nextIdx + 1}`,
+        images: [null, null],
+        status: 'idle',
+        data: null,
+        errorMsg: ''
+      }
+      return [...prev, newOrder]
     })
-    setError('')
-    // Reset input so same file can be selected again after removal
-    e.target.value = ''
-  }, [activeSlot])
+    setActiveOrderIdx(orders.length) // Switch to newly created order
+  }
 
-  const removeImage = useCallback((idx) => {
-    setImages(prev => {
-      const next = [...prev]
-      URL.revokeObjectURL(next[idx].preview)
-      next.splice(idx, 1)
-      return next
+  const handleRemoveOrder = (orderIdx) => {
+    if (orders.length <= 1) return
+    setOrders(prev => {
+      const filtered = prev.filter((_, idx) => idx !== orderIdx)
+      // Re-index remaining orders
+      return filtered.map((ord, newIdx) => ({
+        ...ord,
+        orderIndex: newIdx,
+        title: `Order #${newIdx + 1}`
+      }))
     })
-  }, [])
+    if (activeOrderIdx >= orders.length - 1) {
+      setActiveOrderIdx(Math.max(0, orders.length - 2))
+    }
+  }
 
-  const handleProcess = useCallback(async () => {
-    if (images.length === 0) return
+  // ── Single Order Scan Process ─────────────────────────────────────────────
+  const processSingleOrder = async (orderIdx, isFinalBatchItem = false) => {
+    const targetOrder = orders[orderIdx]
+    const validImages = targetOrder.images.filter(Boolean)
+    if (validImages.length === 0) return null
 
-    setStatus('processing')
-    setError('')
+    // Update status to uploading
+    setOrders(prev => prev.map((ord, idx) =>
+      idx === orderIdx ? { ...ord, status: 'uploading', errorMsg: '' } : ord
+    ))
 
-    for (let i = 0; i < images.length; i++) {
-      const { file } = images[i]
-      const isLast = i === images.length - 1
-      setStatusMessage(
-        images.length > 1
-          ? `Analyzing document ${i + 1} of ${images.length} with Gemini AI Vision...`
-          : 'Uploading & analyzing document with Gemini AI Vision...'
-      )
+    let lastResult = null
 
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('session_secret', secret)
-      formData.append('is_last', isLast ? 'true' : 'false')
+    try {
+      for (let i = 0; i < validImages.length; i++) {
+        const imgObj = validImages[i]
+        const isLastPage = i === validImages.length - 1
+        const isBatchComplete = isFinalBatchItem && isLastPage
 
-      try {
-        const response = await fetch(`${API_URL}/scan-sessions/${sessionId}/process-image`, {
-          method: 'POST',
-          body: formData
+        const formData = new FormData()
+        formData.append('file', imgObj.file)
+        formData.append('session_secret', secret)
+        formData.append('order_index', String(orderIdx))
+        formData.append('is_last', isLastPage ? 'true' : 'false')
+        formData.append('is_batch_complete', isBatchComplete ? 'true' : 'false')
+
+        setBatchProgressMsg(`Analyzing Order #${orderIdx + 1} (Page ${i + 1}/${validImages.length}) with Gemini AI...`)
+
+        const res = await api.post(`/scan-sessions/${sessionId}/process-image`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 45000
         })
 
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}))
-          if (response.status === 410) {
-            setStatus('expired')
-            setError('This scan session has expired. Please generate a new QR code.')
-            return
-          }
-          if (response.status === 503) {
-            setStatus('error')
-            setError(`AI model temporarily busy on image ${i + 1}. Tap "Process Documents" to retry.`)
-            return
-          }
-          throw new Error(errData.detail || `Failed to process image ${i + 1}.`)
-        }
-      } catch (err) {
-        console.error('AI Vision processing failed:', err)
-        setStatus('error')
-        setError(err.message || 'Failed to process document image. Please try again.')
-        return
+        lastResult = res.data.extracted_data || res.data.data || res.data
       }
+
+      setOrders(prev => prev.map((ord, idx) =>
+        idx === orderIdx ? { ...ord, status: 'scanned', data: lastResult } : ord
+      ))
+
+      return lastResult
+    } catch (err) {
+      console.error(`Error analyzing Order #${orderIdx + 1}:`, err)
+      const errMsg = err.response?.data?.detail || 'AI Vision processing failed. Please try again.'
+      setOrders(prev => prev.map((ord, idx) =>
+        idx === orderIdx ? { ...ord, status: 'error', errorMsg: errMsg } : ord
+      ))
+      throw new Error(errMsg)
+    }
+  }
+
+  // ── Submit Entire Batch ────────────────────────────────────────────────────
+  const handleFinalSubmitBatch = async () => {
+    // Ensure all orders have at least one image
+    const invalidOrders = orders.filter(ord => !ord.images.some(Boolean))
+    if (invalidOrders.length > 0) {
+      setGlobalError(`Please take or select a photo for ${invalidOrders.map(o => o.title).join(', ')} before submitting.`)
+      return
     }
 
-    setStatus('success')
-    setStatusMessage(
-      images.length > 1
-        ? 'Both documents processed! Data merged and sent to your computer.'
-        : 'Document processed successfully!'
+    setGlobalError('')
+    setIsSubmittingBatch(true)
+
+    try {
+      for (let i = 0; i < orders.length; i++) {
+        const isFinal = (i === orders.length - 1)
+        await processSingleOrder(i, isFinal)
+      }
+      setBatchComplete(true)
+    } catch (err) {
+      console.error('Batch submit error:', err)
+      setGlobalError(err.message || 'Failed to complete batch scan submission.')
+    } finally {
+      setIsSubmittingBatch(false)
+      setBatchProgressMsg('')
+    }
+  }
+
+  // ── Render Loading / Invalid States ──────────────────────────────────────
+  if (sessionChecking) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center p-6 text-center font-sans">
+        <div className="w-12 h-12 border-4 border-amber-400/30 border-t-amber-400 rounded-full animate-spin mb-4" />
+        <p className="text-zinc-400 text-sm font-medium">Connecting to Diversay AI Scanner...</p>
+      </div>
     )
-  }, [images, sessionId, secret])
+  }
 
-  const handleReset = useCallback(() => {
-    images.forEach(img => URL.revokeObjectURL(img.preview))
-    setImages([])
-    setStatus('idle')
-    setStatusMessage('')
-    setError('')
-  }, [images])
+  if (!sessionValid) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center p-6 text-center font-sans">
+        <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mb-4">
+          <svg className="w-8 h-8 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <h2 className="text-xl font-bold text-zinc-100 mb-2">Scan Session Expired</h2>
+        <p className="text-zinc-400 text-sm max-w-xs mb-6">
+          This QR scan code has expired or is invalid. Please generate a new QR code on your computer screen.
+        </p>
+      </div>
+    )
+  }
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  if (batchComplete) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center p-6 text-center font-sans">
+        <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(16,185,129,0.3)] animate-bounce">
+          <svg className="w-10 h-10 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h2 className="text-2xl font-black text-white mb-2">Batch Sent to Desktop!</h2>
+        <p className="text-zinc-300 text-sm max-w-xs mb-8">
+          Successfully processed <span className="text-amber-400 font-bold">{orders.length} {orders.length === 1 ? 'order' : 'orders'}</span> with Gemini AI. Check your computer screen — all batch cards are populated!
+        </p>
+        <button
+          onClick={() => {
+            setBatchComplete(false)
+            setOrders([
+              {
+                id: 'order-' + Date.now(),
+                orderIndex: 0,
+                title: 'Order #1',
+                images: [null, null],
+                status: 'idle',
+                data: null,
+                errorMsg: ''
+              }
+            ])
+            setActiveOrderIdx(0)
+          }}
+          className="px-6 py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-zinc-950 font-bold rounded-2xl shadow-lg transition-all"
+        >
+          Scan Another Batch
+        </button>
+      </div>
+    )
+  }
+
+  const currentActiveOrder = orders[activeOrderIdx] || orders[0]
+
   return (
-    <div style={s.container}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes fadeInUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes bounceIn { 0% { opacity: 0; transform: scale(0.3); } 50% { opacity: 1; transform: scale(1.05); } 70% { transform: scale(0.9); } 100% { transform: scale(1); } }
-        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
-        @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 20px rgba(16,185,129,0.2); } 50% { box-shadow: 0 0 40px rgba(16,185,129,0.4); } }
-      `}</style>
-
-      {/* Hidden file inputs */}
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment"
-        onChange={handleFileSelected} style={{ display: 'none' }} />
-      <input ref={galleryInputRef} type="file" accept="image/*"
-        onChange={handleFileSelected} style={{ display: 'none' }} />
-
-      {/* Header */}
-      <div style={s.header}>
-        <div style={s.headerInner}>
-          <div style={s.logoBlock}>
-            <div style={s.logoIcon}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
-              </svg>
-            </div>
-            <div>
-              <div style={s.logoTitle}>Diversay</div>
-              <div style={s.logoSubtitle}>Document Scanner</div>
-            </div>
+    <div className="min-h-screen bg-zinc-950 text-white flex flex-col font-sans max-w-md mx-auto">
+      {/* ── Top Header Bar ─────────────────────────────────────────────────── */}
+      <header className="px-5 py-4 bg-zinc-900/80 border-b border-zinc-800/80 backdrop-blur-xl sticky top-0 z-30 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center font-black text-zinc-950 text-sm shadow-md">
+            D
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-zinc-100 leading-none">Diversay AI Scanner</h1>
+            <p className="text-[11px] text-zinc-400 font-medium">Batch Mobile Document Ingest</p>
           </div>
         </div>
+        <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+          {orders.length} {orders.length === 1 ? 'Order' : 'Orders'} Batch
+        </span>
+      </header>
+
+      {/* ── Order Selector Tabs ─────────────────────────────────────────────── */}
+      <div className="px-4 py-3 bg-zinc-900/40 border-b border-zinc-800/50 flex items-center gap-2 overflow-x-auto custom-scroll sticky top-[65px] z-20 backdrop-blur-md">
+        {orders.map((ord, idx) => {
+          const isActive = idx === activeOrderIdx
+          const hasImage = ord.images.some(Boolean)
+          const isScanned = ord.status === 'scanned'
+
+          return (
+            <button
+              key={ord.id}
+              onClick={() => setActiveOrderIdx(idx)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 border ${
+                isActive
+                  ? 'bg-amber-400 text-zinc-950 border-amber-300 shadow-[0_4px_12px_rgba(251,191,36,0.25)]'
+                  : isScanned
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : hasImage
+                  ? 'bg-zinc-800 text-zinc-200 border-zinc-700'
+                  : 'bg-zinc-900/80 text-zinc-400 border-zinc-800'
+              }`}
+            >
+              <span>{ord.title}</span>
+              {isScanned && <span className="text-emerald-400 text-[10px]">✓</span>}
+            </button>
+          )
+        })}
+
+        <button
+          onClick={handleAddOrder}
+          disabled={isSubmittingBatch}
+          className="px-3 py-2 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 transition-all flex items-center gap-1 shrink-0"
+        >
+          <span>+ Add Order</span>
+        </button>
       </div>
 
-      {/* Main Content */}
-      <div style={s.content}>
+      {/* ── Main Order Card Body ────────────────────────────────────────────── */}
+      <main className="flex-1 p-5 space-y-6 pb-36">
+        {/* Active Order Card Header */}
+        <div className="flex items-center justify-between bg-zinc-900/60 border border-zinc-800 p-4 rounded-2xl shadow-sm">
+          <div>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
+              Active Card
+            </span>
+            <h2 className="text-lg font-bold text-white mt-1">{currentActiveOrder.title}</h2>
+          </div>
+          {orders.length > 1 && (
+            <button
+              onClick={() => handleRemoveOrder(activeOrderIdx)}
+              disabled={isSubmittingBatch}
+              className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 border border-rose-500/30 text-xs font-semibold transition-all flex items-center gap-1"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Delete
+            </button>
+          )}
+        </div>
 
-        {/* Expired */}
-        {status === 'expired' && (
-          <div style={{ ...s.card, animation: 'fadeInUp 0.4s ease' }}>
-            <StatusIcon color="#ef4444" icon="x" />
-            <h2 style={s.cardTitle}>Session Expired</h2>
-            <p style={s.cardDesc}>{error}</p>
+        {/* Global Error Banner */}
+        {globalError && (
+          <div className="p-3.5 bg-rose-500/15 border border-rose-500/30 rounded-2xl text-rose-200 text-xs font-medium flex items-start gap-2.5">
+            <svg className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>{globalError}</span>
           </div>
         )}
 
-        {/* Fatal error (no images yet) */}
-        {status === 'error' && images.length === 0 && (
-          <div style={{ ...s.card, animation: 'fadeInUp 0.4s ease' }}>
-            <StatusIcon color="#ef4444" icon="warning" />
-            <h2 style={s.cardTitle}>Invalid Link</h2>
-            <p style={s.cardDesc}>{error}</p>
+        {/* Photo Upload Slots for Active Order */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+              Order Sheet Photos (Up to 2 Pages)
+            </h3>
+            <span className="text-[11px] text-zinc-500 font-medium">
+              {currentActiveOrder.images.filter(Boolean).length}/2 added
+            </span>
           </div>
-        )}
 
-        {/* Success */}
-        {status === 'success' && (
-          <div style={{ ...s.card, animation: 'fadeInUp 0.4s ease' }}>
-            <div style={s.statusIconWrap}>
-              <div style={{ ...s.statusIcon, background: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.25)', animation: 'bounceIn 0.6s ease, pulseGlow 2s infinite' }}>
-                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
-              </div>
-            </div>
-            <h2 style={{ ...s.cardTitle, color: '#10b981' }}>Document Processed!</h2>
-            <p style={s.cardDesc}>
-              {statusMessage || 'The extracted data has been sent to your computer. Check the Diversay app — your order form should be auto-filled now.'}
-            </p>
-            <p style={{ ...s.cardDesc, marginTop: '16px', fontSize: '13px', color: '#71717a' }}>
-              You can safely close this page.
-            </p>
-          </div>
-        )}
+          <div className="grid grid-cols-2 gap-3.5">
+            {[0, 1].map((slotIdx) => {
+              const imgObj = currentActiveOrder.images[slotIdx]
+              const camKey = `${activeOrderIdx}-${slotIdx}-cam`
+              const galKey = `${activeOrderIdx}-${slotIdx}-gal`
 
-        {/* Processing */}
-        {status === 'processing' && (
-          <div style={{ ...s.card, animation: 'fadeInUp 0.4s ease' }}>
-            <div style={s.statusIconWrap}>
-              <div style={{ ...s.statusIcon, background: 'rgba(99,102,241,0.1)', borderColor: 'rgba(99,102,241,0.25)' }}>
-                <div style={s.spinner}/>
-              </div>
-            </div>
-            <h2 style={s.cardTitle}>Processing Document{images.length > 1 ? 's' : ''}</h2>
-            <p style={s.cardDesc}>{statusMessage || 'Analyzing your document...'}</p>
-            <div style={s.progressTrack}><div style={s.progressShimmer}/></div>
-            <p style={{ ...s.cardDesc, marginTop: '12px', fontSize: '11px', color: '#71717a' }}>
-              Please don't close this page.
-            </p>
-          </div>
-        )}
+              return (
+                <div
+                  key={slotIdx}
+                  className="relative bg-zinc-900/60 border border-zinc-800 rounded-2xl p-3 flex flex-col items-center justify-center min-h-[220px] transition-all hover:border-zinc-700 overflow-hidden group"
+                >
+                  {/* Hidden inputs */}
+                  <input
+                    ref={el => { cameraInputRefs.current[camKey] = el }}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={e => handleImageSelected(activeOrderIdx, slotIdx, e.target.files[0])}
+                  />
+                  <input
+                    ref={el => { galleryInputRefs.current[galKey] = el }}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={e => handleImageSelected(activeOrderIdx, slotIdx, e.target.files[0])}
+                  />
 
-        {/* Upload UI */}
-        {(status === 'idle' || (status === 'error' && images.length > 0)) && (
-          <div style={{ animation: 'fadeInUp 0.4s ease' }}>
-            <div style={s.card}>
-              <h2 style={s.cardTitle}>Upload Document Photo{images.length === MAX_IMAGES ? 's' : ''}</h2>
-              <p style={s.cardDesc}>
-                You can upload up to {MAX_IMAGES} images if the order spans two pages. Both will be analyzed and merged.
-              </p>
-            </div>
-
-            {/* Image slots */}
-            <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {images.map((img, idx) => (
-                <div key={idx} style={s.previewCard}>
-                  <div style={s.previewLabel}>
-                    <span style={s.previewBadge}>Page {idx + 1}</span>
-                  </div>
-                  <img src={img.preview} alt={`Document ${idx + 1}`} style={s.previewImage} />
-                  <div style={s.previewActions}>
-                    <button style={s.actionBtn} onClick={() => openPicker(idx, 'camera')}>
-                      <CameraIcon /> Retake
-                    </button>
-                    <button style={s.actionBtn} onClick={() => openPicker(idx, 'gallery')}>
-                      <GalleryIcon /> Replace
-                    </button>
-                    <button style={{ ...s.actionBtn, color: '#f87171' }} onClick={() => removeImage(idx)}>
-                      <TrashIcon /> Remove
-                    </button>
-                  </div>
-                </div>
-              ))}
-
-              {/* Add image slot */}
-              {images.length < MAX_IMAGES && (
-                <div>
-                  {images.length === 0 ? (
-                    // First slot — big upload zone
-                    <div style={s.uploadZone}>
-                      <div style={s.uploadIconWrap}>
-                        <GalleryIcon size={36} color="#a1a1aa" />
-                      </div>
-                      <p style={s.uploadText}>Add a document photo</p>
-                      <p style={s.uploadHint}>Supports JPG, PNG, HEIC</p>
-                      <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'center' }}>
-                        <button style={s.pickerBtn} onClick={() => openPicker(null, 'camera')}>
-                          <CameraIcon /> Camera
+                  {imgObj ? (
+                    // Image Slot Preview
+                    <div className="relative w-full h-full flex flex-col items-center justify-between">
+                      <div className="relative w-full h-36 rounded-xl overflow-hidden bg-black border border-zinc-800">
+                        <img
+                          src={imgObj.preview}
+                          alt={`Page ${slotIdx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveImage(activeOrderIdx, slotIdx)}
+                          className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/70 text-rose-400 flex items-center justify-center backdrop-blur-md border border-white/20"
+                        >
+                          ✕
                         </button>
-                        <button style={s.pickerBtn} onClick={() => openPicker(null, 'gallery')}>
-                          <GalleryIcon /> Gallery
+                        <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold px-2 py-0.5 rounded-md bg-black/70 text-amber-300 border border-amber-400/30 backdrop-blur-md">
+                          Page {slotIdx + 1}
+                        </span>
+                      </div>
+
+                      <div className="w-full mt-2.5 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => cameraInputRefs.current[camKey]?.click()}
+                          className="flex-1 py-1.5 px-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-bold rounded-xl border border-zinc-700 flex items-center justify-center gap-1 transition-all"
+                        >
+                          📷 Retake
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => galleryInputRefs.current[galKey]?.click()}
+                          className="flex-1 py-1.5 px-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-bold rounded-xl border border-zinc-700 flex items-center justify-center gap-1 transition-all"
+                        >
+                          🖼️ Gallery
                         </button>
                       </div>
                     </div>
                   ) : (
-                    // Second slot — compact add button
-                    <div>
-                      <p style={{ fontSize: '12px', color: '#71717a', marginBottom: '8px', textAlign: 'center' }}>
-                        Order spans a second page?
+                    // Empty Slot Picker
+                    <div className="flex flex-col items-center text-center p-2">
+                      <div className="w-10 h-10 rounded-2xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center mb-2.5">
+                        <span className="text-amber-400 font-bold text-sm">P{slotIdx + 1}</span>
+                      </div>
+                      <p className="text-xs font-bold text-zinc-200 mb-0.5">Page {slotIdx + 1}</p>
+                      <p className="text-[10px] text-zinc-500 mb-3">
+                        {slotIdx === 0 ? 'Primary order sheet' : 'Second page (optional)'}
                       </p>
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                        <button style={{ ...s.pickerBtn, flex: 1 }} onClick={() => openPicker(null, 'camera')}>
-                          <CameraIcon /> Snap Page 2
+
+                      <div className="w-full space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => cameraInputRefs.current[camKey]?.click()}
+                          className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 text-xs font-extrabold rounded-xl shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                        >
+                          📷 Camera
                         </button>
-                        <button style={{ ...s.pickerBtn, flex: 1 }} onClick={() => openPicker(null, 'gallery')}>
-                          <GalleryIcon /> Choose from Gallery
+
+                        <button
+                          type="button"
+                          onClick={() => galleryInputRefs.current[galKey]?.click()}
+                          className="w-full py-2 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-xl border border-zinc-700 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                        >
+                          🖼️ Gallery
                         </button>
                       </div>
                     </div>
                   )}
                 </div>
-              )}
-            </div>
+              )
+            })}
+          </div>
+        </div>
 
-            {/* Error banner */}
-            {status === 'error' && error && (
-              <div style={s.errorBanner}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
-                <span>{error}</span>
-              </div>
-            )}
-
-            {/* Process button */}
-            {images.length > 0 && (
-              <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <button style={s.processBtn} onClick={handleProcess}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                    <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+        {/* Single Order Extraction Action / Preview */}
+        {currentActiveOrder.images.some(Boolean) && (
+          <div className="space-y-3">
+            <button
+              onClick={() => processSingleOrder(activeOrderIdx, false)}
+              disabled={currentActiveOrder.status === 'uploading' || isSubmittingBatch}
+              className="w-full py-3 px-4 bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-bold text-xs rounded-2xl border border-amber-400/30 flex items-center justify-center gap-2 transition-all"
+            >
+              {currentActiveOrder.status === 'uploading' ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-amber-300/30 border-t-amber-300 rounded-full animate-spin" />
+                  <span>Analyzing {currentActiveOrder.title} with AI...</span>
+                </>
+              ) : currentActiveOrder.status === 'scanned' ? (
+                <>
+                  <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  Process Document{images.length > 1 ? 's' : ''} ({images.length})
-                </button>
-                {images.length > 0 && (
-                  <button style={s.resetBtn} onClick={handleReset}>Start Over</button>
-                )}
+                  <span>Re-analyze {currentActiveOrder.title} Data</span>
+                </>
+              ) : (
+                <>
+                  <span>⚡ Preview AI Data for {currentActiveOrder.title}</span>
+                </>
+              )}
+            </button>
+
+            {currentActiveOrder.errorMsg && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-300 text-xs">
+                {currentActiveOrder.errorMsg}
               </div>
             )}
 
-            {/* Tips */}
-            <div style={s.tipsCard}>
-              <p style={s.tipsTitle}>📋 Tips for best results</p>
-              <ul style={s.tipsList}>
-                <li>Use good lighting — avoid harsh shadows</li>
-                <li>Keep the document flat and fully visible</li>
-                <li>Hold your phone steady and parallel to the paper</li>
-                <li>Make sure all text is sharp and in focus</li>
-              </ul>
-            </div>
+            {currentActiveOrder.data && (
+              <div className="p-4 bg-zinc-900/80 border border-emerald-500/30 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                    AI Scanned Result
+                  </span>
+                  <span className="text-xs text-zinc-400 font-semibold">
+                    {currentActiveOrder.data.products?.length || 0} Products
+                  </span>
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-zinc-100">
+                    {currentActiveOrder.data.customer_name || 'Customer Name Pending'}
+                  </h4>
+                  <p className="text-xs text-zinc-400">
+                    Invoice: {currentActiveOrder.data.invoice_number || 'N/A'} • Waybill: {currentActiveOrder.data.waybill_number || 'N/A'}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
-      </div>
+      </main>
 
-      {/* Footer */}
-      <div style={s.footer}><p>Diversay Solutions Limited</p></div>
-    </div>
-  )
-}
-
-// ─── Small icon components ───────────────────────────────────────────────────
-function CameraIcon({ size = 14, color = 'currentColor' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-      <circle cx="12" cy="13" r="4"/>
-    </svg>
-  )
-}
-
-function GalleryIcon({ size = 14, color = 'currentColor' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-      <circle cx="8.5" cy="8.5" r="1.5"/>
-      <polyline points="21 15 16 10 5 21"/>
-    </svg>
-  )
-}
-
-function TrashIcon({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
-      <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-    </svg>
-  )
-}
-
-function StatusIcon({ color, icon }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-      <div style={{ width: '72px', height: '72px', borderRadius: '50%', border: `2px solid`, borderColor: color + '44', background: color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {icon === 'x' ? (
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-          </svg>
-        ) : (
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
+      {/* ── Fixed Bottom Action Bar ────────────────────────────────────────── */}
+      <footer className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-zinc-900/90 border-t border-zinc-800/90 backdrop-blur-2xl z-40 space-y-2.5">
+        {batchProgressMsg && (
+          <div className="text-center text-xs font-semibold text-amber-300 flex items-center justify-center gap-2">
+            <div className="w-3.5 h-3.5 border-2 border-amber-300/30 border-t-amber-300 rounded-full animate-spin" />
+            <span>{batchProgressMsg}</span>
+          </div>
         )}
-      </div>
+
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={handleAddOrder}
+            disabled={isSubmittingBatch}
+            className="flex-1 py-3.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-xs rounded-2xl border border-zinc-700 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+          >
+            <span>+ Add Order</span>
+          </button>
+
+          <button
+            onClick={handleFinalSubmitBatch}
+            disabled={isSubmittingBatch || !orders.some(o => o.images.some(Boolean))}
+            className="flex-[2] py-3.5 px-4 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-zinc-950 font-black text-sm rounded-2xl shadow-[0_4px_20px_rgba(251,191,36,0.3)] flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+          >
+            {isSubmittingBatch ? (
+              <>
+                <div className="w-4 h-4 border-2 border-zinc-950/30 border-t-zinc-950 rounded-full animate-spin" />
+                <span>Sending Batch...</span>
+              </>
+            ) : (
+              <>
+                <span>Send {orders.length} {orders.length === 1 ? 'Order' : 'Orders'} to PC →</span>
+              </>
+            )}
+          </button>
+        </div>
+      </footer>
     </div>
   )
-}
-
-// ─── Styles ──────────────────────────────────────────────────────────────────
-const s = {
-  container: { minHeight: '100vh', background: 'linear-gradient(180deg, #09090b 0%, #18181b 100%)', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: '#fafafa', display: 'flex', flexDirection: 'column' },
-  header: { borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(9,9,11,0.8)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', position: 'sticky', top: 0, zIndex: 50 },
-  headerInner: { maxWidth: '480px', margin: '0 auto', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  logoBlock: { display: 'flex', alignItems: 'center', gap: '12px' },
-  logoIcon: { width: '36px', height: '36px', borderRadius: '10px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', flexShrink: 0 },
-  logoTitle: { fontSize: '16px', fontWeight: '800', color: '#fafafa', letterSpacing: '-0.02em' },
-  logoSubtitle: { fontSize: '11px', fontWeight: '500', color: '#71717a', letterSpacing: '0.02em' },
-  content: { flex: 1, maxWidth: '480px', margin: '0 auto', width: '100%', padding: '20px' },
-  card: { background: 'rgba(39,39,42,0.5)', border: '1px solid rgba(63,63,70,0.5)', borderRadius: '16px', padding: '24px', textAlign: 'center' },
-  statusIconWrap: { display: 'flex', justifyContent: 'center', marginBottom: '20px' },
-  statusIcon: { width: '72px', height: '72px', borderRadius: '50%', border: '2px solid', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  cardTitle: { fontSize: '20px', fontWeight: '700', color: '#fafafa', marginBottom: '8px', letterSpacing: '-0.02em' },
-  cardDesc: { fontSize: '14px', color: '#a1a1aa', lineHeight: '1.6' },
-  spinner: { width: '28px', height: '28px', border: '3px solid rgba(99,102,241,0.2)', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 0.8s linear infinite' },
-  progressTrack: { height: '4px', background: 'rgba(63,63,70,0.5)', borderRadius: '2px', marginTop: '20px', overflow: 'hidden' },
-  progressShimmer: { height: '100%', width: '100%', background: 'linear-gradient(90deg, transparent, #6366f1, transparent)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite', borderRadius: '2px' },
-  uploadZone: { border: '2px dashed rgba(63,63,70,0.6)', borderRadius: '16px', padding: '36px 20px', textAlign: 'center', background: 'rgba(39,39,42,0.3)' },
-  uploadIconWrap: { width: '64px', height: '64px', borderRadius: '16px', background: 'rgba(63,63,70,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' },
-  uploadText: { fontSize: '15px', fontWeight: '600', color: '#d4d4d8', marginBottom: '4px' },
-  uploadHint: { fontSize: '12px', color: '#71717a' },
-  pickerBtn: { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '10px 16px', background: 'rgba(63,63,70,0.5)', border: '1px solid rgba(63,63,70,0.7)', borderRadius: '12px', color: '#d4d4d8', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
-  previewCard: { borderRadius: '16px', overflow: 'hidden', border: '1px solid rgba(63,63,70,0.5)', background: 'rgba(39,39,42,0.5)', position: 'relative' },
-  previewLabel: { padding: '10px 14px', borderBottom: '1px solid rgba(63,63,70,0.4)', display: 'flex', alignItems: 'center' },
-  previewBadge: { fontSize: '11px', fontWeight: '700', color: '#a78bfa', background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)', borderRadius: '6px', padding: '2px 8px', letterSpacing: '0.05em', textTransform: 'uppercase' },
-  previewImage: { width: '100%', maxHeight: '280px', objectFit: 'contain', display: 'block', background: '#18181b' },
-  previewActions: { display: 'flex', borderTop: '1px solid rgba(63,63,70,0.4)' },
-  actionBtn: { flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px', padding: '10px 8px', background: 'transparent', border: 'none', borderRight: '1px solid rgba(63,63,70,0.4)', color: '#a1a1aa', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit', lastChild: { borderRight: 'none' } },
-  errorBanner: { marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 16px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '12px', color: '#fca5a5', fontSize: '13px', lineHeight: '1.4' },
-  processBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', padding: '16px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '14px', color: 'white', fontSize: '16px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', letterSpacing: '-0.01em', boxShadow: '0 4px 24px rgba(99,102,241,0.3)' },
-  resetBtn: { width: '100%', padding: '12px', background: 'transparent', border: '1px solid rgba(63,63,70,0.5)', borderRadius: '12px', color: '#71717a', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
-  tipsCard: { marginTop: '20px', background: 'rgba(39,39,42,0.3)', border: '1px solid rgba(63,63,70,0.3)', borderRadius: '14px', padding: '16px 20px' },
-  tipsTitle: { fontSize: '13px', fontWeight: '700', color: '#d4d4d8', marginBottom: '10px' },
-  tipsList: { listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#71717a', lineHeight: '1.5' },
-  footer: { padding: '20px', textAlign: 'center', fontSize: '11px', color: '#52525b', borderTop: '1px solid rgba(255,255,255,0.04)' },
 }
