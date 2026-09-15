@@ -298,12 +298,19 @@ Return ONLY valid JSON matching this schema, with no Markdown code block wrapper
 async def process_scan_image(
     session_id: str,
     file: UploadFile = File(...),
-    session_secret: str = Form(...)
+    session_secret: str = Form(...),
+    is_last: str = Form(default="true")   # "true" | "false" — phone tells us if more images are coming
 ):
     """
     Phone uploads document photo directly to the server.
-    Backend ingests the image, sends it to Gemini 3.6 Flash Multimodal Vision,
-    extracts structured JSON, stores it in the scan session, and returns it to the client.
+    Backend sends image to Gemini multimodal vision, extracts structured JSON,
+    and merges it with any previously uploaded image data for the same session.
+
+    Multi-image merge rules:
+    - Header fields (customer_name, invoice_number, etc.) from the first image win;
+      subsequent images only fill fields that are null/empty.
+    - Products lists are CONCATENATED across all uploads.
+    - Session status is set to "completed" only when is_last=true.
     """
     with _lock:
         session = _sessions.get(session_id)
@@ -336,23 +343,46 @@ async def process_scan_image(
         )
 
     mime_type = file.content_type or "image/jpeg"
-    extracted_data = _process_image_with_gemini(content, mime_type=mime_type)
+    new_data = _process_image_with_gemini(content, mime_type=mime_type)
 
+    # ── Merge with existing session data ──────────────────────────────────────
     with _lock:
-        _sessions[session_id]["status"] = "completed"
-        _sessions[session_id]["data"] = extracted_data
+        existing = _sessions[session_id].get("data") or {}
+
+        if not existing:
+            # First image — use as-is
+            merged = new_data
+        else:
+            # Subsequent image — fill missing header fields, append products
+            HEADER_FIELDS = ["customer_name", "invoice_number", "waybill_number",
+                             "brand", "date", "driver_name", "vehicle_number"]
+            merged = dict(existing)
+            for field in HEADER_FIELDS:
+                if not merged.get(field) and new_data.get(field):
+                    merged[field] = new_data[field]
+
+            # Append products from new image
+            existing_products = merged.get("products") or []
+            new_products = new_data.get("products") or []
+            merged["products"] = existing_products + new_products
+
+        _sessions[session_id]["data"] = merged
+        # Only mark completed when the phone signals this is the final image
+        if is_last.lower() == "true":
+            _sessions[session_id]["status"] = "completed"
+        else:
+            # Keep waiting — more images coming
+            _sessions[session_id]["status"] = "partial"
 
     print(f"\n======================================================================", flush=True)
-    print(f"✨ [GEMINI VISION PROCESSED] Session ID: {session_id}", flush=True)
-    print(f"CUSTOMER: {extracted_data.get('customer_name')}", flush=True)
-    print(f"INVOICE NO: {extracted_data.get('invoice_number')}", flush=True)
-    print(f"WAYBILL NO: {extracted_data.get('waybill_number')}", flush=True)
-    print(f"PRODUCTS: {json.dumps(extracted_data.get('products', []), indent=2)}", flush=True)
+    print(f"✨ [GEMINI VISION PROCESSED] Session ID: {session_id} | is_last={is_last}", flush=True)
+    print(f"CUSTOMER: {merged.get('customer_name')}", flush=True)
+    print(f"INVOICE NO: {merged.get('invoice_number')}", flush=True)
+    print(f"WAYBILL NO: {merged.get('waybill_number')}", flush=True)
+    print(f"PRODUCTS ({len(merged.get('products', []))}): {json.dumps(merged.get('products', []), indent=2)}", flush=True)
     print(f"======================================================================\n", flush=True)
 
     return {
         "message": "Image processed successfully with Gemini AI Vision",
-        "extracted_data": extracted_data
+        "extracted_data": merged
     }
-
-
