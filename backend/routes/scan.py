@@ -191,10 +191,43 @@ _GEMINI_MODELS = [
     "gemini-3.6-flash",
 ]
 
+def _sanitize_extracted_data(data: dict) -> dict:
+    """Sanitize extracted dict: convert placeholder strings ('not present', 'none') to None/empty, and quantities to integer."""
+    if not isinstance(data, dict):
+        return {}
+
+    sanitized = dict(data)
+
+    # 1. Clean driver & vehicle placeholder strings
+    for field in ["driver_name", "vehicle_number"]:
+        val = str(sanitized.get(field) or "").strip().lower()
+        if val in ["not present", "none", "nil", "n/a", "unknown", "null", "undefined"]:
+            sanitized[field] = ""
+
+    # 2. Clean product quantities (e.g. 2.300 -> 2)
+    if isinstance(sanitized.get("products"), list):
+        clean_products = []
+        for p in sanitized["products"]:
+            if isinstance(p, dict):
+                p_copy = dict(p)
+                raw_qty = p_copy.get("quantity", 1)
+                try:
+                    qty_num = float(raw_qty)
+                    p_copy["quantity"] = max(1, int(round(qty_num)))
+                except (ValueError, TypeError):
+                    p_copy["quantity"] = 1
+                clean_products.append(p_copy)
+            elif isinstance(p, str):
+                clean_products.append({"name": p, "quantity": 1})
+        sanitized["products"] = clean_products
+
+    return sanitized
+
+
 def _clean_json_response(raw_text: str) -> dict:
     """
     Strip markdown codeblock wrappers, repair common LLM syntax flaws
-    (single quotes, trailing commas, Python None/True/False), and parse JSON safely.
+    (single quotes, trailing commas, Python None/True/False), parse JSON safely, and sanitize values.
     """
     cleaned = raw_text.strip()
 
@@ -209,39 +242,46 @@ def _clean_json_response(raw_text: str) -> dict:
     if start != -1 and end != -1:
         cleaned = cleaned[start:end+1]
 
+    raw_dict = None
+
     # Attempt 1: Standard json.loads
     try:
-        return json.loads(cleaned)
+        raw_dict = json.loads(cleaned)
     except Exception:
         pass
 
-    # Attempt 2: Repair common JSON syntax errors (trailing commas, Python constants)
-    repaired = re.sub(r',\s*([\]}])', r'\1', cleaned)
-    repaired_const = re.sub(r'\bNone\b', 'null', repaired)
-    repaired_const = re.sub(r'\bTrue\b', 'true', repaired_const)
-    repaired_const = re.sub(r'\bFalse\b', 'false', repaired_const)
+    if raw_dict is None:
+        # Attempt 2: Repair common JSON syntax errors (trailing commas, Python constants)
+        repaired = re.sub(r',\s*([\]}])', r'\1', cleaned)
+        repaired_const = re.sub(r'\bNone\b', 'null', repaired)
+        repaired_const = re.sub(r'\bTrue\b', 'true', repaired_const)
+        repaired_const = re.sub(r'\bFalse\b', 'false', repaired_const)
 
-    try:
-        return json.loads(repaired_const)
-    except Exception:
-        pass
+        try:
+            raw_dict = json.loads(repaired_const)
+        except Exception:
+            pass
 
-    # Attempt 3: Python AST literal_eval (handles single quotes, None, True, False natively)
-    try:
-        parsed_ast = ast.literal_eval(cleaned)
-        if isinstance(parsed_ast, dict):
-            return parsed_ast
-    except Exception:
-        pass
+    if raw_dict is None:
+        # Attempt 3: Python AST literal_eval (handles single quotes, None, True, False natively)
+        try:
+            parsed_ast = ast.literal_eval(cleaned)
+            if isinstance(parsed_ast, dict):
+                raw_dict = parsed_ast
+        except Exception:
+            pass
 
-    # Attempt 4: AST evaluation on repaired text
-    try:
-        parsed_ast = ast.literal_eval(repaired)
-        if isinstance(parsed_ast, dict):
-            return parsed_ast
-    except Exception as e:
-        print(f"[JSON PARSE ERROR] Raw text snippet: {raw_text[:250]}", flush=True)
-        raise e
+    if raw_dict is None:
+        # Attempt 4: AST evaluation on repaired text
+        try:
+            parsed_ast = ast.literal_eval(repaired)
+            if isinstance(parsed_ast, dict):
+                raw_dict = parsed_ast
+        except Exception as e:
+            print(f"[JSON PARSE ERROR] Raw text snippet: {raw_text[:250]}", flush=True)
+            raise e
+
+    return _sanitize_extracted_data(raw_dict)
 
 
 def _process_image_with_ai(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
@@ -264,8 +304,8 @@ Extract the structured data into JSON with the following exact format:
   "waybill_number": "string (e.g. 8492 or DSL/DLN/8492)",
   "brand": "DSL or DSLP",
   "date": "YYYY-MM-DD or string as printed",
-  "driver_name": "string if present",
-  "vehicle_number": "string if present",
+  "driver_name": "string if present, otherwise null",
+  "vehicle_number": "string if present, otherwise null",
   "products": [
     {
       "name": "string (product description)",
@@ -274,7 +314,10 @@ Extract the structured data into JSON with the following exact format:
   ]
 }
 
-Return ONLY valid JSON matching this schema, with no Markdown code block wrappers or extra text.
+Important Rules:
+- If driver_name or vehicle_number is missing, set them to null. Do NOT write "not present" or "n/a".
+- Ensure quantity is an integer count (e.g. 2, 25, 400).
+- Return ONLY valid JSON matching this schema, with no Markdown code block wrappers or extra text.
 """
 
     # ── Stage 1: Try NVIDIA API Vision Models ──────────────────────────────────
@@ -310,7 +353,7 @@ Return ONLY valid JSON matching this schema, with no Markdown code block wrapper
             )
             try:
                 print(f"[NVIDIA VISION] Trying model: {model}", flush=True)
-                with urllib.request.urlopen(req, timeout=30) as resp:
+                with urllib.request.urlopen(req, timeout=12) as resp:
                     resp_body = resp.read().decode("utf-8")
                     data = json.loads(resp_body)
                     raw_text = data["choices"][0]["message"]["content"]
