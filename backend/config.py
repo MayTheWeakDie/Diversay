@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     NVIDIA_API_KEY: str | None = None
+    NVIDIA_API_KEY_SECONDARY: str | None = None
+    NVIDIA_API_KEY_TERTIARY: str | None = None
     
     class Config:
         env_file = ROOT_ENV_FILE

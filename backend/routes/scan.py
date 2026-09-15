@@ -321,48 +321,58 @@ Important Rules:
 """
 
     # ── Stage 1: Try NVIDIA API Vision Models ──────────────────────────────────
-    nvidia_key = getattr(settings, "NVIDIA_API_KEY", None)
-    if nvidia_key:
-        data_uri = f"data:{safe_mime};base64,{base64_image}"
-        headers = {
-            "Authorization": f"Bearer {nvidia_key}",
-            "Content-Type": "application/json"
-        }
+    nvidia_keys = [
+        getattr(settings, "NVIDIA_API_KEY", None),
+        getattr(settings, "NVIDIA_API_KEY_SECONDARY", None),
+        getattr(settings, "NVIDIA_API_KEY_TERTIARY", None),
+    ]
+    valid_nvidia_keys = []
+    for k in nvidia_keys:
+        if k and isinstance(k, str) and k.strip() and k.strip() not in valid_nvidia_keys:
+            valid_nvidia_keys.append(k.strip())
 
-        for model in _NVIDIA_MODELS:
-            payload = {
-                "model": model,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": data_uri}}
-                        ]
-                    }
-                ],
-                "temperature": 0.1,
-                "max_tokens": 4096,
-                "stream": False
+    if valid_nvidia_keys:
+        data_uri = f"data:{safe_mime};base64,{base64_image}"
+        for key_idx, nvidia_key in enumerate(valid_nvidia_keys):
+            headers = {
+                "Authorization": f"Bearer {nvidia_key}",
+                "Content-Type": "application/json"
             }
-            req = urllib.request.Request(
-                "https://integrate.api.nvidia.com/v1/chat/completions",
-                data=json.dumps(payload).encode("utf-8"),
-                headers=headers,
-                method="POST"
-            )
-            try:
-                print(f"[NVIDIA VISION] Trying model: {model}", flush=True)
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    resp_body = resp.read().decode("utf-8")
-                    data = json.loads(resp_body)
-                    raw_text = data["choices"][0]["message"]["content"]
-                    print(f"\n🤖 [RAW LLM OUTPUT - {model}]:\n{raw_text}\n", flush=True)
-                    result = _clean_json_response(raw_text)
-                    print(f"[NVIDIA VISION] Success with model: {model}", flush=True)
-                    return result
-            except Exception as e:
-                print(f"[NVIDIA VISION] {model} failed: {e}", flush=True)
+
+            for model in _NVIDIA_MODELS:
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {"type": "image_url", "image_url": {"url": data_uri}}
+                            ]
+                        }
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 4096,
+                    "stream": False
+                }
+                req = urllib.request.Request(
+                    "https://integrate.api.nvidia.com/v1/chat/completions",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers=headers,
+                    method="POST"
+                )
+                try:
+                    print(f"[NVIDIA VISION] Trying key #{key_idx+1} with model: {model}", flush=True)
+                    with urllib.request.urlopen(req, timeout=12) as resp:
+                        resp_body = resp.read().decode("utf-8")
+                        data = json.loads(resp_body)
+                        raw_text = data["choices"][0]["message"]["content"]
+                        print(f"\n🤖 [RAW LLM OUTPUT - {model} (Key #{key_idx+1})]:\n{raw_text}\n", flush=True)
+                        result = _clean_json_response(raw_text)
+                        print(f"[NVIDIA VISION] Success with Key #{key_idx+1} & model: {model}", flush=True)
+                        return result
+                except Exception as e:
+                    print(f"[NVIDIA VISION] Key #{key_idx+1} / model {model} failed: {e}", flush=True)
 
     # ── Stage 2: Fallback to Gemini AI Vision Waterfall ───────────────────────
     gemini_key = getattr(settings, "GEMINI_API_KEY", None)
