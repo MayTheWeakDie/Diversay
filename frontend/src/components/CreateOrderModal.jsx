@@ -1275,7 +1275,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
             </div>
 
         {/* ─── Mode Selector (shown before form when no mode is chosen) ─── */}
-        {orderCreationMode === null && !loading && (
+        {orderCreationMode === null && (
           <div className="flex-1 flex flex-col items-center justify-center p-8 bg-zinc-950/40 backdrop-blur-2xl">
             <div className="text-center mb-8">
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/15 rounded-full text-xs font-semibold text-zinc-300 mb-3">
