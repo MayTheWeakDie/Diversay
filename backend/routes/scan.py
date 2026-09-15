@@ -68,9 +68,22 @@ class ScanResultSubmit(BaseModel):
     extracted_data: Dict[str, Any]
 
 
+class ScanSessionProgressUpdate(BaseModel):
+    session_secret: str
+    status: str
+    total_images: int
+    processed_images: int
+    failed_images: int
+    progress_message: str
+
+
 class ScanSessionStatusResponse(BaseModel):
-    status: str  # "waiting" | "completed" | "expired"
+    status: str  # "waiting" | "processing" | "completed" | "expired" | "error" | "partial"
     data: Optional[Dict[str, Any]] = None
+    total_images: int = 0
+    processed_images: int = 0
+    failed_images: int = 0
+    progress_message: str = ""
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -90,6 +103,10 @@ def create_scan_session():
             "secret": session_secret,
             "status": "waiting",
             "data": None,
+            "total_images": 0,
+            "processed_images": 0,
+            "failed_images": 0,
+            "progress_message": "",
             "created_at": time.time()
         }
 
@@ -152,6 +169,33 @@ def submit_scan_result(session_id: str, payload: ScanResultSubmit):
     return {"message": "Scan result submitted successfully."}
 
 
+@router.post("/{session_id}/progress", status_code=status.HTTP_200_OK)
+def update_scan_progress(session_id: str, payload: ScanSessionProgressUpdate):
+    """
+    Phone submits progress updates so the PC can display real-time status.
+    """
+    with _lock:
+        session = _sessions.get(session_id)
+
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan session not found or expired.")
+
+    if session["secret"] != payload.session_secret:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid session secret.")
+
+    with _lock:
+        # Don't overwrite completed status with a lower status if it's already done
+        if _sessions[session_id]["status"] not in ["completed"]:
+            _sessions[session_id]["status"] = payload.status
+
+        _sessions[session_id]["total_images"] = payload.total_images
+        _sessions[session_id]["processed_images"] = payload.processed_images
+        _sessions[session_id]["failed_images"] = payload.failed_images
+        _sessions[session_id]["progress_message"] = payload.progress_message
+
+    return {"message": "Progress updated."}
+
+
 @router.get("/{session_id}/result", response_model=ScanSessionStatusResponse)
 def poll_scan_result(session_id: str):
     """
@@ -176,7 +220,11 @@ def poll_scan_result(session_id: str):
 
     return ScanSessionStatusResponse(
         status=session["status"],
-        data=session["data"]
+        data=session["data"],
+        total_images=session.get("total_images", 0),
+        processed_images=session.get("processed_images", 0),
+        failed_images=session.get("failed_images", 0),
+        progress_message=session.get("progress_message", "")
     )
 
 
@@ -363,7 +411,7 @@ Important Rules:
                 )
                 try:
                     print(f"[NVIDIA VISION] Trying key #{key_idx+1} with model: {model}", flush=True)
-                    with urllib.request.urlopen(req, timeout=12) as resp:
+                    with urllib.request.urlopen(req, timeout=45) as resp:
                         resp_body = resp.read().decode("utf-8")
                         data = json.loads(resp_body)
                         raw_text = data["choices"][0]["message"]["content"]
@@ -405,7 +453,7 @@ Important Rules:
             )
             try:
                 print(f"[GEMINI VISION] Trying model: {model}", flush=True)
-                with urllib.request.urlopen(req, timeout=60) as resp:
+                with urllib.request.urlopen(req, timeout=90) as resp:
                     resp_body = resp.read().decode("utf-8")
                     data = json.loads(resp_body)
                     raw_text = data["candidates"][0]["content"]["parts"][0]["text"]

@@ -126,8 +126,14 @@ export default function CreateOrderModal({ isOpen, onClose }) {
   // ── Scan Mode State ──
   const [orderCreationMode, setOrderCreationMode] = useState(null) // null (choosing), 'manual', 'scan'
   const [scanSession, setScanSession] = useState(null) // { session_id, session_secret }
-  const [scanStatus, setScanStatus] = useState('idle') // idle | waiting | completed | expired | error
+  const [scanStatus, setScanStatus] = useState('idle') // idle | waiting | processing | completed | expired | error | partial
   const [scanStatusMessage, setScanStatusMessage] = useState('')
+  const [scanProgressData, setScanProgressData] = useState({
+    total_images: 0,
+    processed_images: 0,
+    failed_images: 0,
+    progress_message: ''
+  })
   const pollTimerRef = useRef(null)
   const [scanDataApplied, setScanDataApplied] = useState(false)
 
@@ -364,6 +370,12 @@ export default function CreateOrderModal({ isOpen, onClose }) {
       setScanSession(null)
       setScanStatus('idle')
       setScanStatusMessage('')
+      setScanProgressData({
+        total_images: 0,
+        processed_images: 0,
+        failed_images: 0,
+        progress_message: ''
+      })
       setScanDataApplied(false)
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current)
@@ -980,22 +992,44 @@ export default function CreateOrderModal({ isOpen, onClose }) {
       pollTimerRef.current = setInterval(async () => {
         try {
           const pollRes = await api.get(`/scan-sessions/${session_id}/result`)
-          const { status: sessionStatus, data } = pollRes.data
+          const { 
+            status: sessionStatus, 
+            data, 
+            total_images, 
+            processed_images, 
+            failed_images, 
+            progress_message 
+          } = pollRes.data
 
-          if (sessionStatus === 'completed' && data) {
-            // Stop polling
-            clearInterval(pollTimerRef.current)
-            pollTimerRef.current = null
-            setScanStatus('completed')
-            setScanStatusMessage('Document data received! Filling order form...')
+          if (sessionStatus === 'completed' || sessionStatus === 'partial') {
+            if (data) {
+              // Stop polling
+              clearInterval(pollTimerRef.current)
+              pollTimerRef.current = null
+              setScanStatus('completed')
+              setScanStatusMessage('Document data received! Filling order form...')
 
-            // Apply the extracted data to the form
-            applyScanDataToForm(data)
+              // Apply the extracted data to the form
+              applyScanDataToForm(data)
+            }
           } else if (sessionStatus === 'expired') {
             clearInterval(pollTimerRef.current)
             pollTimerRef.current = null
             setScanStatus('expired')
             setScanStatusMessage('Scan session expired. Please try again.')
+          } else if (sessionStatus === 'error') {
+            clearInterval(pollTimerRef.current)
+            pollTimerRef.current = null
+            setScanStatus('error')
+            setScanStatusMessage(progress_message || 'Scan session failed.')
+          } else if (sessionStatus === 'processing') {
+            setScanStatus('processing')
+            setScanProgressData({
+              total_images: total_images || 0,
+              processed_images: processed_images || 0,
+              failed_images: failed_images || 0,
+              progress_message: progress_message || 'Processing images...'
+            })
           }
         } catch (err) {
           console.error('Poll error:', err)
@@ -1016,6 +1050,12 @@ export default function CreateOrderModal({ isOpen, onClose }) {
     setScanSession(null)
     setScanStatus('idle')
     setScanStatusMessage('')
+    setScanProgressData({
+      total_images: 0,
+      processed_images: 0,
+      failed_images: 0,
+      progress_message: ''
+    })
     setOrderCreationMode(null)
   }, [])
 
@@ -1331,7 +1371,7 @@ export default function CreateOrderModal({ isOpen, onClose }) {
         {/* ─── QR Code Scan View ─── */}
         {orderCreationMode === 'scan' && scanStatus !== 'completed' && (
           <div className="flex-1 flex items-center justify-center p-6 md:p-8 bg-zinc-950/40 backdrop-blur-2xl">
-            {scanStatus === 'waiting' && scanSession ? (
+            {['waiting', 'processing', 'partial'].includes(scanStatus) && scanSession ? (
               <div className="w-full max-w-2xl bg-white/[0.03] border border-white/15 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-300 ring-1 ring-white/10 grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 items-center">
                 {/* Left Side: QR Code */}
                 <div className="flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-white/10 pb-6 md:pb-0 md:pr-6">
@@ -1365,12 +1405,33 @@ export default function CreateOrderModal({ isOpen, onClose }) {
                   </div>
 
                   {/* Status indicator */}
-                  <div className="bg-white/[0.04] border border-white/10 rounded-xl p-3 flex items-center gap-3">
-                    <div className="relative flex h-3 w-3 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                  <div className="bg-white/[0.04] border border-white/10 rounded-xl p-3 flex flex-col gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="relative flex h-3 w-3 shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                      </div>
+                      <span className="text-xs text-zinc-300 font-medium">
+                        {scanStatus === 'waiting' 
+                          ? 'Waiting for photo upload from phone...' 
+                          : scanProgressData.progress_message || 'Processing images on mobile...'}
+                      </span>
                     </div>
-                    <span className="text-xs text-zinc-300 font-medium">Waiting for photo upload from phone...</span>
+                    
+                    {scanStatus === 'processing' && scanProgressData.total_images > 0 && (
+                      <div className="flex flex-col gap-1.5 w-full">
+                        <div className="flex justify-between items-center text-[10px] text-zinc-400 font-bold">
+                          <span>Progress</span>
+                          <span>{Math.round(((scanProgressData.processed_images + scanProgressData.failed_images) / scanProgressData.total_images) * 100)}%</span>
+                        </div>
+                        <div className="w-full bg-zinc-900 rounded-full h-1.5 overflow-hidden">
+                          <div 
+                            className="bg-indigo-500 h-1.5 rounded-full transition-all duration-300"
+                            style={{ width: `${((scanProgressData.processed_images + scanProgressData.failed_images) / scanProgressData.total_images) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}
