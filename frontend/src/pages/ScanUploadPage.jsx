@@ -29,7 +29,7 @@ export default function ScanUploadPage() {
       id: 'order-' + Date.now(),
       orderIndex: 0,
       title: 'Order #1',
-      images: [null, null], // Page 1 & Page 2 slots
+      images: [null], // Dynamic list of image slots for this order
       status: 'idle', // 'idle' | 'uploading' | 'scanned' | 'error'
       data: null,
       errorMsg: ''
@@ -84,7 +84,7 @@ export default function ScanUploadPage() {
     }
   }, [])
 
-  // ── Image Handling Functions ─────────────────────────────────────────────
+  // ── Image & Page Slot Functions ─────────────────────────────────────────────
   const handleImageSelected = (orderIdx, slotIdx, file) => {
     if (!file) return
     const previewUrl = URL.createObjectURL(file)
@@ -98,20 +98,35 @@ export default function ScanUploadPage() {
       return {
         ...ord,
         images: newImages,
-        status: 'idle', // reset scan status when image changes
+        status: 'idle',
         errorMsg: ''
       }
     }))
   }
 
-  const handleRemoveImage = (orderIdx, slotIdx) => {
+  const handleAddPageSlot = (orderIdx) => {
+    setOrders(prev => prev.map((ord, idx) => {
+      if (idx !== orderIdx) return ord
+      return {
+        ...ord,
+        images: [...ord.images, null]
+      }
+    }))
+  }
+
+  const handleRemovePageSlot = (orderIdx, slotIdx) => {
     setOrders(prev => prev.map((ord, idx) => {
       if (idx !== orderIdx) return ord
       const newImages = [...ord.images]
       if (newImages[slotIdx] && newImages[slotIdx].preview) {
         URL.revokeObjectURL(newImages[slotIdx].preview)
       }
-      newImages[slotIdx] = null
+      // If > 1 slot, remove the slot completely. If only 1 slot, reset it to null.
+      if (newImages.length > 1) {
+        newImages.splice(slotIdx, 1)
+      } else {
+        newImages[0] = null
+      }
       return {
         ...ord,
         images: newImages,
@@ -129,7 +144,7 @@ export default function ScanUploadPage() {
         id: 'order-' + Date.now() + '-' + nextIdx,
         orderIndex: nextIdx,
         title: `Order #${nextIdx + 1}`,
-        images: [null, null],
+        images: [null],
         status: 'idle',
         data: null,
         errorMsg: ''
@@ -169,7 +184,7 @@ export default function ScanUploadPage() {
     try {
       for (let i = 0; i < validImages.length; i++) {
         const imgObj = validImages[i]
-        const isLastPage = i === validImages.length - 1
+        const isLastPage = (i === validImages.length - 1)
         const isBatchComplete = isFinalBatchItem && isLastPage
 
         const formData = new FormData()
@@ -179,7 +194,7 @@ export default function ScanUploadPage() {
         formData.append('is_last', isLastPage ? 'true' : 'false')
         formData.append('is_batch_complete', isBatchComplete ? 'true' : 'false')
 
-        setBatchProgressMsg(`Analyzing Order #${orderIdx + 1} (Page ${i + 1}/${validImages.length}) with Gemini AI...`)
+        setBatchProgressMsg(`Analyzing Order #${orderIdx + 1} (Page ${i + 1}/${validImages.length}) with AI...`)
 
         const res = await api.post(`/scan-sessions/${sessionId}/process-image`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -272,7 +287,7 @@ export default function ScanUploadPage() {
                 id: 'order-' + Date.now(),
                 orderIndex: 0,
                 title: 'Order #1',
-                images: [null, null],
+                images: [null],
                 status: 'idle',
                 data: null,
                 errorMsg: ''
@@ -382,16 +397,21 @@ export default function ScanUploadPage() {
         <div className="space-y-3.5">
           <div className="flex items-center justify-between px-1">
             <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-zinc-400">
-              Order Documents (Max 2 Pages)
+              Order Documents ({currentActiveOrder.images.filter(Boolean).length} {currentActiveOrder.images.filter(Boolean).length === 1 ? 'Page' : 'Pages'} Added)
             </h3>
-            <span className="text-[11px] text-zinc-500 font-mono">
-              {currentActiveOrder.images.filter(Boolean).length}/2 Pages
-            </span>
+            <button
+              type="button"
+              onClick={() => handleAddPageSlot(activeOrderIdx)}
+              disabled={isSubmittingBatch}
+              className="text-[11px] font-bold text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all active:scale-95"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Add Page</span>
+            </button>
           </div>
 
           <div className="grid grid-cols-2 gap-3.5">
-            {[0, 1].map((slotIdx) => {
-              const imgObj = currentActiveOrder.images[slotIdx]
+            {currentActiveOrder.images.map((imgObj, slotIdx) => {
               const camKey = `${activeOrderIdx}-${slotIdx}-cam`
               const galKey = `${activeOrderIdx}-${slotIdx}-gal`
 
@@ -428,7 +448,7 @@ export default function ScanUploadPage() {
                         />
                         <button
                           type="button"
-                          onClick={() => handleRemoveImage(activeOrderIdx, slotIdx)}
+                          onClick={() => handleRemovePageSlot(activeOrderIdx, slotIdx)}
                           className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 hover:bg-black text-white flex items-center justify-center border border-white/20 transition-all"
                         >
                           <X className="w-4 h-4" />
@@ -465,7 +485,7 @@ export default function ScanUploadPage() {
                       </div>
                       <p className="text-xs font-extrabold text-white mb-0.5">Page {slotIdx + 1}</p>
                       <p className="text-[10px] text-zinc-500 mb-4 font-medium">
-                        {slotIdx === 0 ? 'Primary order sheet' : 'Second page (optional)'}
+                        {slotIdx === 0 ? 'Primary order sheet' : `Page ${slotIdx + 1} sheet`}
                       </p>
 
                       <div className="w-full space-y-2">
@@ -493,6 +513,17 @@ export default function ScanUploadPage() {
               )
             })}
           </div>
+
+          {/* Add Page CTA Button */}
+          <button
+            type="button"
+            onClick={() => handleAddPageSlot(activeOrderIdx)}
+            disabled={isSubmittingBatch}
+            className="w-full py-2.5 px-4 bg-zinc-950 hover:bg-zinc-900 border border-dashed border-zinc-800 text-zinc-300 hover:text-white text-xs font-bold rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95"
+          >
+            <Plus className="w-4 h-4 text-zinc-400" />
+            <span>Add Another Page to {currentActiveOrder.title}</span>
+          </button>
         </div>
 
         {/* AI Analysis Preview Card */}
