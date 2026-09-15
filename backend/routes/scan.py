@@ -368,7 +368,8 @@ async def process_scan_image(
 
         _sessions[session_id]["data"] = merged
         # Only mark completed when the phone signals this is the final image
-        if is_last.lower() == "true":
+        is_last_flag = is_last.lower() == "true" if isinstance(is_last, str) else True
+        if is_last_flag:
             _sessions[session_id]["status"] = "completed"
         else:
             # Keep waiting — more images coming
