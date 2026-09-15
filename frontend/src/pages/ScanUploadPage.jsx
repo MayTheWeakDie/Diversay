@@ -83,45 +83,16 @@ export default function ScanUploadPage() {
     
     setStatus('processing')
     setError('')
+    setStatusMessage('Uploading image & analyzing document with Gemini AI Vision...')
     
     try {
-      // Fetch products/customers for matching
-      // We don't require auth here — we use the scan-sessions endpoint directly
-      // The matching happens client-side using the data the PC already has
-      // So we just do the OCR and send raw + parsed results
+      const formData = new FormData()
+      formData.append('file', imageFile)
+      formData.append('session_secret', secret)
       
-      setStatusMessage('Preparing image...')
-      
-      // Run OCR and parse
-      const result = await processDocumentImage(
-        imageFile,
-        [], // No customer list on phone — PC will do the final matching
-        [], // No product list on phone — PC will do the final matching  
-        (msg) => setStatusMessage(msg)
-      )
-      
-      setStatusMessage('Sending data to your computer...')
-      
-      // POST to backend scan session
-      const response = await fetch(`${API_URL}/scan-sessions/${sessionId}/result`, {
+      const response = await fetch(`${API_URL}/scan-sessions/${sessionId}/process-image`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_secret: secret,
-          extracted_data: {
-            raw_text: result.raw_text,
-            invoice_number: result.invoice_number,
-            waybill_number: result.waybill_number,
-            invoice_number_full: result.invoice_number_full,
-            waybill_number_full: result.waybill_number_full,
-            brand: result.brand,
-            date: result.date,
-            customer_name: result.parsed?.customer_name || result.customer?.name || '',
-            customer_location: result.customer_location || '',
-            customer_contact: result.customer_contact || '',
-            products: (result.products && result.products.length > 0) ? result.products : (result.parsed?.products || [])
-          }
-        })
+        body: formData
       })
       
       if (!response.ok) {
@@ -131,17 +102,18 @@ export default function ScanUploadPage() {
           setError('This scan session has expired. Please generate a new QR code.')
           return
         }
-        throw new Error(errData.detail || 'Failed to submit scan results.')
+        throw new Error(errData.detail || 'Failed to process document image.')
       }
       
       setStatus('success')
       setStatusMessage('Document processed successfully!')
     } catch (err) {
-      console.error('OCR processing failed:', err)
+      console.error('AI Vision processing failed:', err)
       setStatus('error')
-      setError(err.message || 'Failed to process the document. Please try again.')
+      setError(err.message || 'Failed to process document image. Please try again.')
     }
   }, [imageFile, sessionId, secret])
+
   
   const handleRetry = useCallback(() => {
     setImageFile(null)

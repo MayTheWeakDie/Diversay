@@ -13,9 +13,13 @@ import time
 import threading
 import json
 import sys
-from fastapi import APIRouter, HTTPException, status
+import base64
+import urllib.request
+import urllib.error
+from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
+from config import get_settings
 
 router = APIRouter(prefix="/scan-sessions", tags=["scan"])
 
@@ -24,6 +28,7 @@ router = APIRouter(prefix="/scan-sessions", tags=["scan"])
 SESSION_TTL_SECONDS = 600  # 10 minutes
 _sessions: Dict[str, dict] = {}
 _lock = threading.Lock()
+
 
 
 def _cleanup_expired():
@@ -171,4 +176,153 @@ def poll_scan_result(session_id: str):
         status=session["status"],
         data=session["data"]
     )
+
+
+# ─── Gemini AI Vision Processing ──────────────────────────────────────────────
+def _process_image_with_gemini(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
+    """
+    Ingest document image bytes, call Gemini 3.6 Flash multimodal vision,
+    and parse structured invoice/waybill JSON.
+    """
+    settings = get_settings()
+    api_key = settings.GEMINI_API_KEY
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="GEMINI_API_KEY is not configured on the server."
+        )
+
+    base64_image = base64.b64encode(image_bytes).decode("utf-8")
+
+    prompt = """
+You are an expert document scanner AI for a commercial logistics and distribution company in Nigeria (Diversay Solutions Limited / DSL / DSLP).
+Examine this invoice/waybill image carefully.
+Extract the structured data into JSON with the following exact format:
+{
+  "customer_name": "string (full name of customer/store)",
+  "invoice_number": "string (e.g. 10245 or DSL/SA/10245)",
+  "waybill_number": "string (e.g. 8492 or DSL/DLN/8492)",
+  "brand": "DSL or DSLP",
+  "date": "YYYY-MM-DD or string as printed",
+  "driver_name": "string if present",
+  "vehicle_number": "string if present",
+  "products": [
+    {
+      "name": "string (product description)",
+      "quantity": 10
+    }
+  ]
+}
+
+Return ONLY valid JSON matching this schema, with no Markdown code block wrappers or extra text.
+"""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {
+                    "inline_data": {
+                        "mime_type": mime_type if mime_type in ["image/jpeg", "image/jpg", "image/png", "image/webp"] else "image/jpeg",
+                        "data": base64_image
+                    }
+                }
+            ]
+        }],
+        "generationConfig": {
+            "response_mime_type": "application/json"
+        }
+    }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            resp_body = resp.read().decode("utf-8")
+            data = json.loads(resp_body)
+            raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+            parsed_json = json.loads(raw_text)
+            return parsed_json
+    except urllib.error.HTTPError as e:
+        err_msg = e.read().decode("utf-8")
+        print(f"[GEMINI VISION HTTP ERROR]: {e.code} - {err_msg}", flush=True)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Gemini AI Vision processing failed: {e.code}"
+        )
+    except Exception as e:
+        print(f"[GEMINI VISION ERROR]: {e}", flush=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process image with Gemini AI Vision: {str(e)}"
+        )
+
+
+@router.post("/{session_id}/process-image", status_code=status.HTTP_200_OK)
+async def process_scan_image(
+    session_id: str,
+    file: UploadFile = File(...),
+    session_secret: str = Form(...)
+):
+    """
+    Phone uploads document photo directly to the server.
+    Backend ingests the image, sends it to Gemini 3.6 Flash Multimodal Vision,
+    extracts structured JSON, stores it in the scan session, and returns it to the client.
+    """
+    with _lock:
+        session = _sessions.get(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scan session not found or expired."
+        )
+
+    if session["secret"] != session_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid session secret."
+        )
+
+    if time.time() - session["created_at"] > SESSION_TTL_SECONDS:
+        with _lock:
+            _sessions.pop(session_id, None)
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Scan session has expired."
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty."
+        )
+
+    mime_type = file.content_type or "image/jpeg"
+    extracted_data = _process_image_with_gemini(content, mime_type=mime_type)
+
+    with _lock:
+        _sessions[session_id]["status"] = "completed"
+        _sessions[session_id]["data"] = extracted_data
+
+    print(f"\n======================================================================", flush=True)
+    print(f"✨ [GEMINI VISION PROCESSED] Session ID: {session_id}", flush=True)
+    print(f"CUSTOMER: {extracted_data.get('customer_name')}", flush=True)
+    print(f"INVOICE NO: {extracted_data.get('invoice_number')}", flush=True)
+    print(f"WAYBILL NO: {extracted_data.get('waybill_number')}", flush=True)
+    print(f"PRODUCTS: {json.dumps(extracted_data.get('products', []), indent=2)}", flush=True)
+    print(f"======================================================================\n", flush=True)
+
+    return {
+        "message": "Image processed successfully with Gemini AI Vision",
+        "extracted_data": extracted_data
+    }
+
 

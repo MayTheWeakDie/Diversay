@@ -1,3 +1,4 @@
+
 import { createWorker } from 'tesseract.js';
 import fs from 'fs';
 import { parseDocumentText } from './utils/ocrParser.js';
