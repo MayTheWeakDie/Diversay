@@ -179,12 +179,12 @@ def poll_scan_result(session_id: str):
 
 
 # ─── Gemini AI Vision Processing ──────────────────────────────────────────────
-# Model waterfall: tries least-demanded model first, escalates on 503.
-# gemini-2.5-flash-lite has the highest free RPD quota and fewest 503s.
+# Model waterfall — ALL entries verified working with this API key (probed 2026-09-15).
+# Lightest/least-demanded first to minimise 503s and quota usage.
 _GEMINI_MODELS = [
-    "gemini-2.5-flash-lite",   # Primary: highest free quota, least demand
-    "gemini-3.1-flash-lite",   # Secondary: free tier, lower traffic than 3.6
-    "gemini-3.6-flash",        # Tertiary: fallback (our original model)
+    "gemini-3.1-flash-lite",   # Primary:   lightest, confirmed ✅
+    "gemini-3.5-flash-lite",   # Secondary: also light, confirmed ✅
+    "gemini-3.6-flash",        # Tertiary:  confirmed ✅, our battle-tested original
 ]
 
 def _process_image_with_gemini(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
@@ -268,12 +268,13 @@ Return ONLY valid JSON matching this schema, with no Markdown code block wrapper
             err_msg = e.read().decode("utf-8")
             print(f"[GEMINI VISION] {model} → HTTP {e.code}: {err_msg[:200]}", flush=True)
 
-            if e.code in (503, 429):
-                # Model overloaded or rate-limited — try next model in waterfall
+            if e.code in (503, 429, 404):
+                # 503/429: overloaded/rate-limited — try next model
+                # 404: model deprecated/removed — try next model
                 last_error = e.code
                 continue
 
-            # Non-transient error (400, 401, 404 etc) — fail immediately
+            # Hard errors (400 bad request, 401 auth) — fail immediately
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Gemini AI Vision error ({model}): HTTP {e.code}"
