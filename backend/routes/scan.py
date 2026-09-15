@@ -16,6 +16,8 @@ import sys
 import base64
 import urllib.request
 import urllib.error
+import re
+import ast
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
@@ -180,8 +182,7 @@ def poll_scan_result(session_id: str):
 
 # ─── AI Vision Processing (NVIDIA API Primary + Gemini Fallback) ─────────────
 _NVIDIA_MODELS = [
-    "meta/llama-3.2-11b-vision-instruct",
-    "meta/llama-3.2-90b-vision-instruct",
+    "meta/llama-3.2-11b-vision-instruct",   # Fast 11B multimodal model (3-5s response)
 ]
 
 _GEMINI_MODELS = [
@@ -191,18 +192,57 @@ _GEMINI_MODELS = [
 ]
 
 def _clean_json_response(raw_text: str) -> dict:
-    """Strip markdown codeblock wrappers and parse JSON safely."""
+    """
+    Strip markdown codeblock wrappers, repair common LLM syntax flaws
+    (single quotes, trailing commas, Python None/True/False), and parse JSON safely.
+    """
     cleaned = raw_text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\n?", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\n?```$", "", cleaned)
 
+    # Strip markdown wrappers
+    if "```" in cleaned:
+        cleaned = re.sub(r"```(?:json)?", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.replace("```", "")
+
+    # Extract JSON object substring
     start = cleaned.find("{")
     end = cleaned.rfind("}")
     if start != -1 and end != -1:
         cleaned = cleaned[start:end+1]
 
-    return json.loads(cleaned)
+    # Attempt 1: Standard json.loads
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    # Attempt 2: Repair common JSON syntax errors (trailing commas, Python constants)
+    repaired = re.sub(r',\s*([\]}])', r'\1', cleaned)
+    repaired_const = re.sub(r'\bNone\b', 'null', repaired)
+    repaired_const = re.sub(r'\bTrue\b', 'true', repaired_const)
+    repaired_const = re.sub(r'\bFalse\b', 'false', repaired_const)
+
+    try:
+        return json.loads(repaired_const)
+    except Exception:
+        pass
+
+    # Attempt 3: Python AST literal_eval (handles single quotes, None, True, False natively)
+    try:
+        parsed_ast = ast.literal_eval(cleaned)
+        if isinstance(parsed_ast, dict):
+            return parsed_ast
+    except Exception:
+        pass
+
+    # Attempt 4: AST evaluation on repaired text
+    try:
+        parsed_ast = ast.literal_eval(repaired)
+        if isinstance(parsed_ast, dict):
+            return parsed_ast
+    except Exception as e:
+        print(f"[JSON PARSE ERROR] Raw text snippet: {raw_text[:250]}", flush=True)
+        raise e
+
 
 def _process_image_with_ai(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     """
@@ -274,6 +314,7 @@ Return ONLY valid JSON matching this schema, with no Markdown code block wrapper
                     resp_body = resp.read().decode("utf-8")
                     data = json.loads(resp_body)
                     raw_text = data["choices"][0]["message"]["content"]
+                    print(f"\n🤖 [RAW LLM OUTPUT - {model}]:\n{raw_text}\n", flush=True)
                     result = _clean_json_response(raw_text)
                     print(f"[NVIDIA VISION] Success with model: {model}", flush=True)
                     return result
@@ -315,6 +356,7 @@ Return ONLY valid JSON matching this schema, with no Markdown code block wrapper
                     resp_body = resp.read().decode("utf-8")
                     data = json.loads(resp_body)
                     raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    print(f"\n🤖 [RAW LLM OUTPUT - {model}]:\n{raw_text}\n", flush=True)
                     result = _clean_json_response(raw_text)
                     print(f"[GEMINI VISION] Success with model: {model}", flush=True)
                     return result
