@@ -1,10 +1,22 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
+import {
+  Camera,
+  Image as ImageIcon,
+  Plus,
+  Trash2,
+  X,
+  CheckCircle2,
+  AlertCircle,
+  Sparkles,
+  Send,
+  RefreshCw,
+  Layers,
+  FileText,
+  Loader2,
+  ArrowRight
+} from 'lucide-react'
 import api from '../services/api'
-
-const API_URL = (import.meta.env.VITE_API_URL && !import.meta.env.VITE_API_URL.includes('localhost') && !import.meta.env.VITE_API_URL.includes('127.0.0.1'))
-  ? import.meta.env.VITE_API_URL.replace(/\/$/, '')
-  : window.location.origin
 
 export default function ScanUploadPage() {
   const { sessionId } = useParams()
@@ -124,14 +136,13 @@ export default function ScanUploadPage() {
       }
       return [...prev, newOrder]
     })
-    setActiveOrderIdx(orders.length) // Switch to newly created order
+    setActiveOrderIdx(orders.length)
   }
 
   const handleRemoveOrder = (orderIdx) => {
     if (orders.length <= 1) return
     setOrders(prev => {
       const filtered = prev.filter((_, idx) => idx !== orderIdx)
-      // Re-index remaining orders
       return filtered.map((ord, newIdx) => ({
         ...ord,
         orderIndex: newIdx,
@@ -149,7 +160,6 @@ export default function ScanUploadPage() {
     const validImages = targetOrder.images.filter(Boolean)
     if (validImages.length === 0) return null
 
-    // Update status to uploading
     setOrders(prev => prev.map((ord, idx) =>
       idx === orderIdx ? { ...ord, status: 'uploading', errorMsg: '' } : ord
     ))
@@ -196,7 +206,6 @@ export default function ScanUploadPage() {
 
   // ── Submit Entire Batch ────────────────────────────────────────────────────
   const handleFinalSubmitBatch = async () => {
-    // Ensure all orders have at least one image
     const invalidOrders = orders.filter(ord => !ord.images.some(Boolean))
     if (invalidOrders.length > 0) {
       setGlobalError(`Please take or select a photo for ${invalidOrders.map(o => o.title).join(', ')} before submitting.`)
@@ -224,23 +233,21 @@ export default function ScanUploadPage() {
   // ── Render Loading / Invalid States ──────────────────────────────────────
   if (sessionChecking) {
     return (
-      <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center p-6 text-center font-sans">
-        <div className="w-12 h-12 border-4 border-amber-400/30 border-t-amber-400 rounded-full animate-spin mb-4" />
-        <p className="text-zinc-400 text-sm font-medium">Connecting to Diversay AI Scanner...</p>
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center font-sans">
+        <Loader2 className="w-10 h-10 text-white animate-spin mb-4" />
+        <p className="text-zinc-400 text-xs tracking-wide uppercase font-semibold">Connecting to Diversay AI...</p>
       </div>
     )
   }
 
   if (!sessionValid) {
     return (
-      <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center p-6 text-center font-sans">
-        <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mb-4">
-          <svg className="w-8 h-8 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center font-sans">
+        <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-4 text-zinc-400">
+          <AlertCircle className="w-7 h-7 text-zinc-300" />
         </div>
-        <h2 className="text-xl font-bold text-zinc-100 mb-2">Scan Session Expired</h2>
-        <p className="text-zinc-400 text-sm max-w-xs mb-6">
+        <h2 className="text-lg font-bold text-white mb-2">Scan Session Expired</h2>
+        <p className="text-zinc-400 text-xs max-w-xs mb-6 leading-relaxed">
           This QR scan code has expired or is invalid. Please generate a new QR code on your computer screen.
         </p>
       </div>
@@ -249,15 +256,13 @@ export default function ScanUploadPage() {
 
   if (batchComplete) {
     return (
-      <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center p-6 text-center font-sans">
-        <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(16,185,129,0.3)] animate-bounce">
-          <svg className="w-10 h-10 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-          </svg>
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center font-sans">
+        <div className="w-16 h-16 rounded-full bg-white text-black flex items-center justify-center mb-6 shadow-[0_0_50px_rgba(255,255,255,0.25)] animate-pulse">
+          <CheckCircle2 className="w-9 h-9" />
         </div>
-        <h2 className="text-2xl font-black text-white mb-2">Batch Sent to Desktop!</h2>
-        <p className="text-zinc-300 text-sm max-w-xs mb-8">
-          Successfully processed <span className="text-amber-400 font-bold">{orders.length} {orders.length === 1 ? 'order' : 'orders'}</span> with Gemini AI. Check your computer screen — all batch cards are populated!
+        <h2 className="text-2xl font-black text-white mb-2 tracking-tight">Batch Sent to Desktop</h2>
+        <p className="text-zinc-400 text-xs max-w-xs mb-8 leading-relaxed">
+          Successfully processed <span className="text-white font-bold">{orders.length} {orders.length === 1 ? 'order' : 'orders'}</span> with Gemini AI. Check your computer screen to review the autofilled batch cards.
         </p>
         <button
           onClick={() => {
@@ -275,7 +280,7 @@ export default function ScanUploadPage() {
             ])
             setActiveOrderIdx(0)
           }}
-          className="px-6 py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-zinc-950 font-bold rounded-2xl shadow-lg transition-all"
+          className="px-6 py-3.5 bg-white hover:bg-zinc-200 text-black font-extrabold text-xs uppercase tracking-wider rounded-2xl shadow-xl transition-all active:scale-95"
         >
           Scan Another Batch
         </button>
@@ -286,25 +291,27 @@ export default function ScanUploadPage() {
   const currentActiveOrder = orders[activeOrderIdx] || orders[0]
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col font-sans max-w-md mx-auto">
+    <div className="min-h-screen bg-black text-white flex flex-col font-sans max-w-md mx-auto border-x border-zinc-900 selection:bg-white selection:text-black">
       {/* ── Top Header Bar ─────────────────────────────────────────────────── */}
-      <header className="px-5 py-4 bg-zinc-900/80 border-b border-zinc-800/80 backdrop-blur-xl sticky top-0 z-30 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center font-black text-zinc-950 text-sm shadow-md">
+      <header className="px-5 py-4 bg-black/90 border-b border-zinc-900 backdrop-blur-2xl sticky top-0 z-30 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-white text-black flex items-center justify-center font-black text-sm shadow-[0_0_15px_rgba(255,255,255,0.2)]">
             D
           </div>
           <div>
-            <h1 className="text-base font-bold text-zinc-100 leading-none">Diversay AI Scanner</h1>
-            <p className="text-[11px] text-zinc-400 font-medium">Batch Mobile Document Ingest</p>
+            <h1 className="text-sm font-extrabold text-white tracking-tight uppercase">Diversay AI</h1>
+            <p className="text-[10px] text-zinc-500 font-semibold tracking-wider uppercase">Document Scanner</p>
           </div>
         </div>
-        <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
-          {orders.length} {orders.length === 1 ? 'Order' : 'Orders'} Batch
-        </span>
+
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] font-semibold text-zinc-300">
+          <Layers className="w-3.5 h-3.5 text-zinc-400" />
+          <span>{orders.length} {orders.length === 1 ? 'Order' : 'Orders'}</span>
+        </div>
       </header>
 
       {/* ── Order Selector Tabs ─────────────────────────────────────────────── */}
-      <div className="px-4 py-3 bg-zinc-900/40 border-b border-zinc-800/50 flex items-center gap-2 overflow-x-auto custom-scroll sticky top-[65px] z-20 backdrop-blur-md">
+      <div className="px-4 py-3 bg-zinc-950/80 border-b border-zinc-900 flex items-center gap-2 overflow-x-auto custom-scroll sticky top-[65px] z-20 backdrop-blur-xl">
         {orders.map((ord, idx) => {
           const isActive = idx === activeOrderIdx
           const hasImage = ord.images.some(Boolean)
@@ -314,18 +321,18 @@ export default function ScanUploadPage() {
             <button
               key={ord.id}
               onClick={() => setActiveOrderIdx(idx)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 border ${
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap shrink-0 border ${
                 isActive
-                  ? 'bg-amber-400 text-zinc-950 border-amber-300 shadow-[0_4px_12px_rgba(251,191,36,0.25)]'
+                  ? 'bg-white text-black border-white shadow-[0_0_15px_rgba(255,255,255,0.2)] font-extrabold'
                   : isScanned
-                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  ? 'bg-zinc-900 text-zinc-100 border-zinc-700'
                   : hasImage
-                  ? 'bg-zinc-800 text-zinc-200 border-zinc-700'
-                  : 'bg-zinc-900/80 text-zinc-400 border-zinc-800'
+                  ? 'bg-zinc-900/90 text-zinc-300 border-zinc-800'
+                  : 'bg-black text-zinc-500 border-zinc-900 hover:text-zinc-300'
               }`}
             >
               <span>{ord.title}</span>
-              {isScanned && <span className="text-emerald-400 text-[10px]">✓</span>}
+              {isScanned && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
             </button>
           )
         })}
@@ -333,54 +340,52 @@ export default function ScanUploadPage() {
         <button
           onClick={handleAddOrder}
           disabled={isSubmittingBatch}
-          className="px-3 py-2 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 transition-all flex items-center gap-1 shrink-0"
+          className="px-3 py-2 rounded-xl text-xs font-bold bg-zinc-900 text-zinc-300 border border-zinc-800 hover:bg-zinc-800 hover:text-white transition-all flex items-center gap-1 shrink-0 active:scale-95"
         >
-          <span>+ Add Order</span>
+          <Plus className="w-3.5 h-3.5" />
+          <span>Add</span>
         </button>
       </div>
 
       {/* ── Main Order Card Body ────────────────────────────────────────────── */}
       <main className="flex-1 p-5 space-y-6 pb-36">
-        {/* Active Order Card Header */}
-        <div className="flex items-center justify-between bg-zinc-900/60 border border-zinc-800 p-4 rounded-2xl shadow-sm">
+        {/* Active Order Header */}
+        <div className="flex items-center justify-between bg-zinc-950 border border-zinc-900 p-4 rounded-2xl">
           <div>
-            <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20">
-              Active Card
+            <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
+              Active Selection
             </span>
-            <h2 className="text-lg font-bold text-white mt-1">{currentActiveOrder.title}</h2>
+            <h2 className="text-base font-extrabold text-white mt-1 tracking-tight">{currentActiveOrder.title}</h2>
           </div>
+
           {orders.length > 1 && (
             <button
               onClick={() => handleRemoveOrder(activeOrderIdx)}
               disabled={isSubmittingBatch}
-              className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 border border-rose-500/30 text-xs font-semibold transition-all flex items-center gap-1"
+              className="p-2 rounded-xl bg-zinc-900 hover:bg-rose-500/10 hover:border-rose-500/30 text-zinc-400 hover:text-rose-400 border border-zinc-800 text-xs font-semibold transition-all flex items-center gap-1.5"
+              title="Delete Order"
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-              Delete
+              <Trash2 className="w-4 h-4" />
             </button>
           )}
         </div>
 
         {/* Global Error Banner */}
         {globalError && (
-          <div className="p-3.5 bg-rose-500/15 border border-rose-500/30 rounded-2xl text-rose-200 text-xs font-medium flex items-start gap-2.5">
-            <svg className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+          <div className="p-3.5 bg-zinc-900 border border-rose-500/40 rounded-2xl text-rose-300 text-xs font-medium flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
             <span>{globalError}</span>
           </div>
         )}
 
         {/* Photo Upload Slots for Active Order */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
-              Order Sheet Photos (Up to 2 Pages)
+        <div className="space-y-3.5">
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-[11px] font-extrabold uppercase tracking-wider text-zinc-400">
+              Order Documents (Max 2 Pages)
             </h3>
-            <span className="text-[11px] text-zinc-500 font-medium">
-              {currentActiveOrder.images.filter(Boolean).length}/2 added
+            <span className="text-[11px] text-zinc-500 font-mono">
+              {currentActiveOrder.images.filter(Boolean).length}/2 Pages
             </span>
           </div>
 
@@ -393,7 +398,7 @@ export default function ScanUploadPage() {
               return (
                 <div
                   key={slotIdx}
-                  className="relative bg-zinc-900/60 border border-zinc-800 rounded-2xl p-3 flex flex-col items-center justify-center min-h-[220px] transition-all hover:border-zinc-700 overflow-hidden group"
+                  className="relative bg-zinc-950 border border-zinc-900 rounded-2xl p-3 flex flex-col items-center justify-between min-h-[230px] transition-all hover:border-zinc-800 overflow-hidden"
                 >
                   {/* Hidden inputs */}
                   <input
@@ -414,7 +419,7 @@ export default function ScanUploadPage() {
 
                   {imgObj ? (
                     // Image Slot Preview
-                    <div className="relative w-full h-full flex flex-col items-center justify-between">
+                    <div className="w-full h-full flex flex-col justify-between">
                       <div className="relative w-full h-36 rounded-xl overflow-hidden bg-black border border-zinc-800">
                         <img
                           src={imgObj.preview}
@@ -424,40 +429,42 @@ export default function ScanUploadPage() {
                         <button
                           type="button"
                           onClick={() => handleRemoveImage(activeOrderIdx, slotIdx)}
-                          className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/70 text-rose-400 flex items-center justify-center backdrop-blur-md border border-white/20"
+                          className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 hover:bg-black text-white flex items-center justify-center border border-white/20 transition-all"
                         >
-                          ✕
+                          <X className="w-4 h-4" />
                         </button>
-                        <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold px-2 py-0.5 rounded-md bg-black/70 text-amber-300 border border-amber-400/30 backdrop-blur-md">
+                        <span className="absolute bottom-2 left-2 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-black/80 text-white border border-white/20 backdrop-blur-md">
                           Page {slotIdx + 1}
                         </span>
                       </div>
 
-                      <div className="w-full mt-2.5 flex items-center gap-1.5">
+                      <div className="grid grid-cols-2 gap-1.5 mt-3">
                         <button
                           type="button"
                           onClick={() => cameraInputRefs.current[camKey]?.click()}
-                          className="flex-1 py-1.5 px-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-bold rounded-xl border border-zinc-700 flex items-center justify-center gap-1 transition-all"
+                          className="py-2 px-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white text-[10px] font-bold rounded-xl border border-zinc-800 flex items-center justify-center gap-1 transition-all active:scale-95"
                         >
-                          📷 Retake
+                          <Camera className="w-3 h-3" />
+                          <span>Retake</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => galleryInputRefs.current[galKey]?.click()}
-                          className="flex-1 py-1.5 px-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-bold rounded-xl border border-zinc-700 flex items-center justify-center gap-1 transition-all"
+                          className="py-2 px-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white text-[10px] font-bold rounded-xl border border-zinc-800 flex items-center justify-center gap-1 transition-all active:scale-95"
                         >
-                          🖼️ Gallery
+                          <ImageIcon className="w-3 h-3" />
+                          <span>Gallery</span>
                         </button>
                       </div>
                     </div>
                   ) : (
                     // Empty Slot Picker
-                    <div className="flex flex-col items-center text-center p-2">
-                      <div className="w-10 h-10 rounded-2xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center mb-2.5">
-                        <span className="text-amber-400 font-bold text-sm">P{slotIdx + 1}</span>
+                    <div className="w-full h-full flex flex-col items-center justify-center text-center py-2">
+                      <div className="w-10 h-10 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-2.5 text-zinc-400">
+                        <FileText className="w-5 h-5 text-zinc-400" />
                       </div>
-                      <p className="text-xs font-bold text-zinc-200 mb-0.5">Page {slotIdx + 1}</p>
-                      <p className="text-[10px] text-zinc-500 mb-3">
+                      <p className="text-xs font-extrabold text-white mb-0.5">Page {slotIdx + 1}</p>
+                      <p className="text-[10px] text-zinc-500 mb-4 font-medium">
                         {slotIdx === 0 ? 'Primary order sheet' : 'Second page (optional)'}
                       </p>
 
@@ -465,17 +472,19 @@ export default function ScanUploadPage() {
                         <button
                           type="button"
                           onClick={() => cameraInputRefs.current[camKey]?.click()}
-                          className="w-full py-2 px-3 bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 text-xs font-extrabold rounded-xl shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                          className="w-full py-2.5 px-3 bg-white hover:bg-zinc-200 text-black text-xs font-extrabold rounded-xl shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95"
                         >
-                          📷 Camera
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>Take Photo</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => galleryInputRefs.current[galKey]?.click()}
-                          className="w-full py-2 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-xl border border-zinc-700 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                          className="w-full py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white text-xs font-bold rounded-xl border border-zinc-800 flex items-center justify-center gap-1.5 transition-all active:scale-95"
                         >
-                          🖼️ Gallery
+                          <ImageIcon className="w-3.5 h-3.5" />
+                          <span>Choose Photo</span>
                         </button>
                       </div>
                     </div>
@@ -486,55 +495,56 @@ export default function ScanUploadPage() {
           </div>
         </div>
 
-        {/* Single Order Extraction Action / Preview */}
+        {/* AI Analysis Preview Card */}
         {currentActiveOrder.images.some(Boolean) && (
           <div className="space-y-3">
             <button
               onClick={() => processSingleOrder(activeOrderIdx, false)}
               disabled={currentActiveOrder.status === 'uploading' || isSubmittingBatch}
-              className="w-full py-3 px-4 bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-bold text-xs rounded-2xl border border-amber-400/30 flex items-center justify-center gap-2 transition-all"
+              className="w-full py-3.5 px-4 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 font-extrabold text-xs rounded-2xl border border-zinc-800 flex items-center justify-center gap-2 transition-all active:scale-95"
             >
               {currentActiveOrder.status === 'uploading' ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-amber-300/30 border-t-amber-300 rounded-full animate-spin" />
-                  <span>Analyzing {currentActiveOrder.title} with AI...</span>
+                  <Loader2 className="w-4 h-4 text-white animate-spin" />
+                  <span>Analyzing with Gemini AI...</span>
                 </>
               ) : currentActiveOrder.status === 'scanned' ? (
                 <>
-                  <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span>Re-analyze {currentActiveOrder.title} Data</span>
+                  <RefreshCw className="w-4 h-4 text-zinc-400" />
+                  <span>Re-analyze Order Data</span>
                 </>
               ) : (
                 <>
-                  <span>⚡ Preview AI Data for {currentActiveOrder.title}</span>
+                  <Sparkles className="w-4 h-4 text-white" />
+                  <span>Test AI Analysis Preview</span>
                 </>
               )}
             </button>
 
             {currentActiveOrder.errorMsg && (
-              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-300 text-xs">
-                {currentActiveOrder.errorMsg}
+              <div className="p-3.5 bg-zinc-900 border border-rose-500/30 rounded-2xl text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{currentActiveOrder.errorMsg}</span>
               </div>
             )}
 
             {currentActiveOrder.data && (
-              <div className="p-4 bg-zinc-900/80 border border-emerald-500/30 rounded-2xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-                    AI Scanned Result
+              <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-white" />
+                    AI Extracted Data
                   </span>
-                  <span className="text-xs text-zinc-400 font-semibold">
+                  <span className="text-xs text-white font-extrabold bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
                     {currentActiveOrder.data.products?.length || 0} Products
                   </span>
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-zinc-100">
-                    {currentActiveOrder.data.customer_name || 'Customer Name Pending'}
+                  <h4 className="text-sm font-extrabold text-white">
+                    {currentActiveOrder.data.customer_name || 'Customer Name Unspecified'}
                   </h4>
-                  <p className="text-xs text-zinc-400">
-                    Invoice: {currentActiveOrder.data.invoice_number || 'N/A'} • Waybill: {currentActiveOrder.data.waybill_number || 'N/A'}
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Invoice: <span className="text-zinc-200 font-mono">{currentActiveOrder.data.invoice_number || 'N/A'}</span> • Waybill: <span className="text-zinc-200 font-mono">{currentActiveOrder.data.waybill_number || 'N/A'}</span>
                   </p>
                 </div>
               </div>
@@ -544,10 +554,10 @@ export default function ScanUploadPage() {
       </main>
 
       {/* ── Fixed Bottom Action Bar ────────────────────────────────────────── */}
-      <footer className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-zinc-900/90 border-t border-zinc-800/90 backdrop-blur-2xl z-40 space-y-2.5">
+      <footer className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-black/95 border-t border-zinc-900 backdrop-blur-2xl z-40 space-y-3">
         {batchProgressMsg && (
-          <div className="text-center text-xs font-semibold text-amber-300 flex items-center justify-center gap-2">
-            <div className="w-3.5 h-3.5 border-2 border-amber-300/30 border-t-amber-300 rounded-full animate-spin" />
+          <div className="text-center text-xs font-semibold text-zinc-300 flex items-center justify-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
             <span>{batchProgressMsg}</span>
           </div>
         )}
@@ -556,24 +566,26 @@ export default function ScanUploadPage() {
           <button
             onClick={handleAddOrder}
             disabled={isSubmittingBatch}
-            className="flex-1 py-3.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-xs rounded-2xl border border-zinc-700 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+            className="flex-1 py-3.5 px-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 font-bold text-xs rounded-2xl border border-zinc-800 flex items-center justify-center gap-1.5 transition-all active:scale-95"
           >
-            <span>+ Add Order</span>
+            <Plus className="w-4 h-4" />
+            <span>Add Order</span>
           </button>
 
           <button
             onClick={handleFinalSubmitBatch}
             disabled={isSubmittingBatch || !orders.some(o => o.images.some(Boolean))}
-            className="flex-[2] py-3.5 px-4 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-zinc-950 font-black text-sm rounded-2xl shadow-[0_4px_20px_rgba(251,191,36,0.3)] flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+            className="flex-[2] py-3.5 px-4 bg-white hover:bg-zinc-200 text-black font-extrabold text-xs tracking-wider uppercase rounded-2xl shadow-[0_0_30px_rgba(255,255,255,0.2)] flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
           >
             {isSubmittingBatch ? (
               <>
-                <div className="w-4 h-4 border-2 border-zinc-950/30 border-t-zinc-950 rounded-full animate-spin" />
+                <Loader2 className="w-4 h-4 text-black animate-spin" />
                 <span>Sending Batch...</span>
               </>
             ) : (
               <>
-                <span>Send {orders.length} {orders.length === 1 ? 'Order' : 'Orders'} to PC →</span>
+                <span>Send {orders.length} {orders.length === 1 ? 'Order' : 'Orders'} to PC</span>
+                <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
