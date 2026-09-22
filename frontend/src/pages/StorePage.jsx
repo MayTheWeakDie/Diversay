@@ -60,15 +60,15 @@ export default function StorePage() {
   ]
 
   return (
-    <div className="animate-in fade-in duration-300 space-y-8">
+    <div className="animate-in fade-in duration-300 space-y-8 pt-2">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 pb-6 border-b border-zinc-800/60">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-white uppercase flex items-center gap-3">
-            <Store className="text-emerald-500" size={32} />
+            <Store className="text-white" size={32} />
             Store Registry
           </h1>
-          <p className="text-zinc-400 text-sm mt-1">
+          <p className="text-zinc-400 text-sm mt-2 leading-relaxed">
             {stores.length} warehouse{stores.length !== 1 ? 's' : ''} across Nigeria — each with its own inventory
           </p>
         </div>
@@ -77,7 +77,7 @@ export default function StorePage() {
         {isAdmin && (
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/10 hover:shadow-emerald-500/20 active:scale-[0.97] self-start md:self-auto"
+            className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-zinc-200 text-zinc-950 text-sm font-bold rounded-xl transition-all shadow-md active:scale-[0.97] self-start md:self-auto shrink-0"
           >
             <Plus size={18} />
             Add New Store
@@ -85,29 +85,26 @@ export default function StorePage() {
         )}
       </div>
 
-      {/* ── Global Analytics Entry Point (Full Area Monochromatic Hover Effect) ── */}
+      {/* ── Global Analytics Entry Point (Full Area Monochromatic White Hover Fill) ── */}
       <div
         onClick={() => navigate('/analytics/global')}
-        className="relative overflow-hidden bg-zinc-900/80 border border-zinc-800/90 rounded-2xl p-5 cursor-pointer group hover:border-zinc-500/80 hover:bg-zinc-800/90 hover:shadow-[0_0_30px_rgba(255,255,255,0.08)] transition-all duration-300 active:scale-[0.99]"
+        className="relative overflow-hidden bg-zinc-900 border border-zinc-800 rounded-2xl p-5 cursor-pointer group hover:bg-white hover:border-white hover:shadow-2xl transition-all duration-300 active:scale-[0.99]"
       >
-        {/* Subtle white radial glow on hover */}
-        <div className="absolute inset-0 bg-gradient-to-r from-white/[0.03] via-white/[0.06] to-white/[0.03] opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-
         <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700/80 flex items-center justify-center text-white group-hover:bg-white group-hover:text-zinc-950 group-hover:border-white group-hover:scale-110 transition-all duration-300 shadow-md">
+            <div className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700/80 flex items-center justify-center text-white group-hover:bg-zinc-950 group-hover:text-white group-hover:border-zinc-950 group-hover:scale-105 transition-all duration-300 shadow-md flex-shrink-0">
               <BarChart3 size={24} />
             </div>
             <div>
-              <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center gap-2 group-hover:text-white">
+              <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center gap-2 group-hover:text-zinc-950 transition-colors">
                 Global Analytics
-                <Activity size={15} className="text-zinc-400 group-hover:text-white transition-colors animate-pulse" />
+                <Activity size={15} className="text-zinc-400 group-hover:text-zinc-700 transition-colors animate-pulse" />
               </h3>
-              <p className="text-zinc-400 group-hover:text-zinc-300 text-xs mt-0.5 transition-colors">Cross-store intelligence — products, seasons, zones, expenses & more</p>
+              <p className="text-zinc-400 group-hover:text-zinc-600 text-xs mt-0.5 transition-colors font-medium">Cross-store intelligence — products, seasons, zones, expenses & more</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 text-white border border-zinc-700/80 rounded-xl text-xs font-bold group-hover:bg-white group-hover:text-zinc-950 group-hover:border-white transition-all duration-200 shadow-sm">
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 text-white border border-zinc-700/80 rounded-xl text-xs font-bold group-hover:bg-zinc-950 group-hover:text-white group-hover:border-zinc-950 transition-all duration-200 shadow-sm flex-shrink-0">
             <span>View Dashboard</span>
             <ChevronRight size={15} className="group-hover:translate-x-1 transition-transform duration-200" />
           </div>
@@ -371,7 +368,7 @@ function AddStoreModal({ onClose, onCreated }) {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full py-3 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/10 active:scale-[0.98]"
+            className="w-full py-3 bg-white hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-950 text-sm font-bold rounded-xl transition-all shadow-md active:scale-[0.98]"
           >
             {submitting ? 'Creating Store...' : 'Create Store'}
           </button>

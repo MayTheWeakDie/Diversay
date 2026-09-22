@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import and_, or_, func
 from database import get_db
 from models import User, Order, OrderLineItem, OrderReferenceCard, Product, Customer, AuditLog, OrderStatus, ActionType, Store, StoreInventory, UnitType
@@ -400,7 +400,7 @@ def create_order(
 @router.get("/", response_model=dict)
 def list_orders(
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=5000),
     state: Optional[str] = Query(None),
     city: Optional[str] = Query(None),
     product_id: Optional[int] = Query(None),
@@ -532,14 +532,14 @@ def list_orders(
     count_query = query.with_entities(sqla_func.count(Order.id))
     total = count_query.scalar()
     
-    # Eager load relationships on the paginated result query to optimize performance
+    # Eager load relationships on the paginated result query using selectinload for 1-to-many collections
     query_fetch = query.options(
         joinedload(Order.customer),
         joinedload(Order.created_by_user),
         joinedload(Order.source_store),
         joinedload(Order.destination_store),
-        joinedload(Order.line_items).joinedload(OrderLineItem.product),
-        joinedload(Order.reference_cards).joinedload(OrderReferenceCard.line_items).joinedload(OrderLineItem.product)
+        selectinload(Order.line_items).selectinload(OrderLineItem.product),
+        selectinload(Order.reference_cards).selectinload(OrderReferenceCard.line_items).selectinload(OrderLineItem.product)
     )
     
     orders = query_fetch.order_by(Order.id.desc()).offset(skip).limit(limit).all()

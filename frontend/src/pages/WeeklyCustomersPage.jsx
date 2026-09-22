@@ -7,6 +7,8 @@ import {
   Cell,
   BarChart,
   Bar,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   Tooltip,
@@ -84,7 +86,7 @@ const fuzzyMatch = (query, target) => {
   })
 }
 
-// Constants matching existing styling guidelines
+// Constants matching professional minimalist zinc-white styling guidelines
 const STATUS_COLORS = {
   'Delivered': '#10b981',  // Emerald Green
   'InTransit': '#f59e0b',  // Warm Amber / Gold
@@ -92,13 +94,13 @@ const STATUS_COLORS = {
 }
 
 const PIE_COLORS = [
-  '#0e7490', // Darker Cyan (700)
-  '#1d4ed8', // Darker Blue (700)
-  '#047857', // Darker Emerald (700)
-  '#be123c', // Darker Rose (700)
-  '#7e22ce', // Darker Purple (700)
-  '#eab308', // Yellow (kept)
-  '#c2410c'  // Darker Orange (700)
+  '#ffffff', // Crisp Zinc White
+  '#e4e4e7', // Zinc 200 (Light Silver)
+  '#cbd5e1', // Slate 300 (Titanium Silver)
+  '#94a3b8', // Slate 400 (Cool Steel)
+  '#64748b', // Slate 500 (Mid Slate)
+  '#475569', // Slate 600 (Dark Slate)
+  '#334155'  // Slate 700 (Deep Charcoal)
 ]
 
 // Date Formatting helpers
@@ -130,8 +132,40 @@ const getDispatchTime = (dtStr) => {
   }
 }
 
-// Persistent memory cache to store orders by time range key (prevents slow database fetches when returning from order details)
+// Persistent memory cache to store orders by time range key
 let _weeklyOrdersCache = {}
+
+// Custom Glassmorphism Tooltip for Area Chart
+const CustomFulfillmentTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    const total = payload.reduce((acc, entry) => acc + (entry.value || 0), 0)
+    return (
+      <div className="bg-zinc-950/95 border border-zinc-800 backdrop-blur-md px-4 py-3 rounded-xl shadow-2xl space-y-2">
+        <p className="text-xs font-black text-white uppercase tracking-wider border-b border-zinc-800/80 pb-1.5">
+          {label}
+        </p>
+        <div className="space-y-1.5">
+          {payload.map((entry, index) => (
+            <div key={index} className="flex items-center justify-between gap-6 text-[11px]">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: entry.color }} />
+                <span className="text-zinc-300 font-semibold">{entry.name}</span>
+              </div>
+              <span className="text-white font-bold">{entry.value}</span>
+            </div>
+          ))}
+        </div>
+        {total > 0 && (
+          <div className="pt-1.5 border-t border-zinc-800/80 flex items-center justify-between text-[11px]">
+            <span className="text-zinc-400 font-semibold">Total Orders</span>
+            <span className="text-emerald-400 font-bold">{total}</span>
+          </div>
+        )}
+      </div>
+    )
+  }
+  return null
+}
 
 export default function WeeklyCustomersPage() {
   const navigate = useNavigate()
@@ -236,30 +270,30 @@ export default function WeeklyCustomersPage() {
         if (!_weeklyOrdersCache[timeRange]) {
           setLoading(true)
         }
-        let allItems = []
-        let skip = 0
-        const limit = 100
-        let hasMore = true
+        const baseParams = {}
+        if (!dateBounds.isAllTime) {
+          baseParams.start_date = dateBounds.start
+          baseParams.end_date = dateBounds.end
+        }
 
-        while (hasMore) {
-          const params = {
-            limit,
-            skip
-          }
-          if (!dateBounds.isAllTime) {
-            params.start_date = dateBounds.start
-            params.end_date = dateBounds.end
-          }
+        // 1. Single fast initial request with limit 500 & trailing slash (prevents 307 redirects)
+        const limit = 500
+        const firstRes = await api.get('/orders/', { params: { ...baseParams, limit, skip: 0 } })
+        let allItems = firstRes.data.items || []
+        const total = firstRes.data.total || 0
 
-          const response = await api.get('/orders', { params })
-          const items = response.data.items || []
-          allItems = [...allItems, ...items]
-
-          if (items.length < limit || allItems.length >= (response.data.total || 0)) {
-            hasMore = false
-          } else {
-            skip += limit
+        // 2. Parallel fetch for remaining items if dataset exceeds 500
+        if (total > allItems.length) {
+          const remainingPromises = []
+          for (let skip = limit; skip < total; skip += limit) {
+            remainingPromises.push(api.get('/orders/', { params: { ...baseParams, limit, skip } }))
           }
+          const restResponses = await Promise.all(remainingPromises)
+          restResponses.forEach(res => {
+            if (res.data?.items) {
+              allItems = allItems.concat(res.data.items)
+            }
+          })
         }
 
         setOrders(allItems)
@@ -542,8 +576,10 @@ export default function WeeklyCustomersPage() {
                           cy="50%"
                           innerRadius={65}
                           outerRadius={85}
-                          paddingAngle={3}
+                          paddingAngle={2}
                           dataKey="value"
+                          stroke="#09090b"
+                          strokeWidth={2}
                           onMouseEnter={(entry) => setHoveredSlice(entry)}
                           onMouseLeave={() => setHoveredSlice(null)}
                         >
@@ -634,7 +670,21 @@ export default function WeeklyCustomersPage() {
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartBarData} margin={{ top: 10, right: 10, left: -20, bottom: 35 }} barSize={22}>
+                    <AreaChart data={chartBarData} margin={{ top: 10, right: 10, left: -20, bottom: 35 }}>
+                      <defs>
+                        <linearGradient id="deliveredGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={STATUS_COLORS.Delivered} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={STATUS_COLORS.Delivered} stopOpacity={0.0} />
+                        </linearGradient>
+                        <linearGradient id="inTransitGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={STATUS_COLORS.InTransit} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={STATUS_COLORS.InTransit} stopOpacity={0.0} />
+                        </linearGradient>
+                        <linearGradient id="delayedGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={STATUS_COLORS.Delayed} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={STATUS_COLORS.Delayed} stopOpacity={0.0} />
+                        </linearGradient>
+                      </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
                       <XAxis
                         dataKey="name"
@@ -655,17 +705,8 @@ export default function WeeklyCustomersPage() {
                         allowDecimals={false}
                       />
                       <Tooltip
-                        cursor={{ fill: 'rgba(255,255,255,0.03)' }}
-                        contentStyle={{
-                          backgroundColor: '#09090b',
-                          borderColor: '#27272a',
-                          borderRadius: '12px',
-                          color: '#ffffff',
-                          fontSize: '11px',
-                          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)'
-                        }}
-                        itemStyle={{ color: '#ffffff' }}
-                        labelStyle={{ color: '#ffffff', fontWeight: 'bold' }}
+                        content={<CustomFulfillmentTooltip />}
+                        cursor={{ stroke: '#52525b', strokeWidth: 1, strokeDasharray: '4 4' }}
                       />
                       <Legend
                         verticalAlign="top"
@@ -675,10 +716,46 @@ export default function WeeklyCustomersPage() {
                         iconType="circle"
                         wrapperStyle={{ fontSize: '10px', color: '#a1a1aa', textTransform: 'uppercase', letterSpacing: '0.05em', paddingBottom: '12px' }}
                       />
-                      <Bar dataKey="Delivered" stackId="statusStack" fill={STATUS_COLORS.Delivered} radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="InTransit" stackId="statusStack" fill={STATUS_COLORS.InTransit} radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="Delayed" stackId="statusStack" fill={STATUS_COLORS.Delayed} radius={[6, 6, 0, 0]} />
-                    </BarChart>
+                      <Area
+                        type="monotone"
+                        dataKey="Delivered"
+                        stroke={STATUS_COLORS.Delivered}
+                        strokeWidth={1.75}
+                        fillOpacity={1}
+                        fill="url(#deliveredGrad)"
+                        dot={{ r: 2.5, fill: STATUS_COLORS.Delivered, stroke: '#18181b', strokeWidth: 1 }}
+                        activeDot={{ r: 5, fill: STATUS_COLORS.Delivered, stroke: '#18181b', strokeWidth: 2 }}
+                        isAnimationActive={true}
+                        animationDuration={1200}
+                        animationEasing="ease-in-out"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="InTransit"
+                        stroke={STATUS_COLORS.InTransit}
+                        strokeWidth={1.5}
+                        fillOpacity={1}
+                        fill="url(#inTransitGrad)"
+                        dot={{ r: 2.5, fill: STATUS_COLORS.InTransit, stroke: '#18181b', strokeWidth: 1 }}
+                        activeDot={{ r: 5, fill: STATUS_COLORS.InTransit, stroke: '#18181b', strokeWidth: 2 }}
+                        isAnimationActive={true}
+                        animationDuration={1400}
+                        animationEasing="ease-in-out"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="Delayed"
+                        stroke={STATUS_COLORS.Delayed}
+                        strokeWidth={1.5}
+                        fillOpacity={1}
+                        fill="url(#delayedGrad)"
+                        dot={{ r: 2.5, fill: STATUS_COLORS.Delayed, stroke: '#18181b', strokeWidth: 1 }}
+                        activeDot={{ r: 5, fill: STATUS_COLORS.Delayed, stroke: '#18181b', strokeWidth: 2 }}
+                        isAnimationActive={true}
+                        animationDuration={1600}
+                        animationEasing="ease-in-out"
+                      />
+                    </AreaChart>
                   </ResponsiveContainer>
                 )}
               </div>
