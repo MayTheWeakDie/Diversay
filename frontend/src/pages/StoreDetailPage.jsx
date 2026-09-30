@@ -73,7 +73,9 @@ import {
   CheckCircle,
   XCircle,
   Loader2,
-  Trash2
+  Trash2,
+  Hash,
+  Receipt
 } from 'lucide-react'
 
 const formatDateWithTime = (dateStr) => {
@@ -367,8 +369,9 @@ export default function StoreDetailPage() {
     }
   }
 
-  // Trending products range selector
+  // Trending products range & metric selectors
   const [trendingRange, setTrendingRange] = useState('all')
+  const [trendingMetric, setTrendingMetric] = useState('units') // 'units' or 'orders'
 
   const TRENDING_RANGES = [
     { value: '1', label: 'Today' },
@@ -980,25 +983,59 @@ export default function StoreDetailPage() {
                     <BarChart3 size={16} className="text-emerald-400" />
                     <h3 className="text-xs font-bold text-white uppercase tracking-wider">Top 5 Trending Products</h3>
                   </div>
-                  <div className="relative flex items-center">
-                    <select
-                      value={trendingRange}
-                      onChange={(e) => setTrendingRange(e.target.value)}
-                      className="appearance-none bg-zinc-950 text-emerald-400 border border-zinc-800/80 hover:border-zinc-700 rounded-xl px-3 py-1.5 pr-8 text-[11px] font-bold focus:outline-none focus:border-emerald-500/50 cursor-pointer shadow-sm transition-colors"
-                      style={{ colorScheme: 'dark' }}
-                    >
-                      {TRENDING_RANGES.map(range => (
-                        <option key={range.value} value={range.value} className="bg-zinc-900 text-zinc-100 py-1">
-                          {range.label}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={14} className="absolute right-2.5 pointer-events-none text-emerald-400" />
+                  
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Metric Toggle: Units vs Orders */}
+                    <div className="flex bg-zinc-950 p-1 border border-zinc-800/80 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setTrendingMetric('units') }}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+                          trendingMetric === 'units'
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
+                            : 'text-zinc-400 hover:text-zinc-200 border border-transparent'
+                        }`}
+                        title="View top products by total units sold"
+                      >
+                        <Hash size={12} />
+                        <span>Units</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setTrendingMetric('orders') }}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+                          trendingMetric === 'orders'
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
+                            : 'text-zinc-400 hover:text-zinc-200 border border-transparent'
+                        }`}
+                        title="View top products by individual orders count"
+                      >
+                        <Receipt size={12} />
+                        <span>Orders</span>
+                      </button>
+                    </div>
+
+                    {/* Timeframe Select Dropdown */}
+                    <div className="relative flex items-center">
+                      <select
+                        value={trendingRange}
+                        onChange={(e) => setTrendingRange(e.target.value)}
+                        className="appearance-none bg-zinc-950 text-emerald-400 border border-zinc-800/80 hover:border-zinc-700 rounded-xl px-3 py-1.5 pr-8 text-[11px] font-bold focus:outline-none focus:border-emerald-500/50 cursor-pointer shadow-sm transition-colors"
+                        style={{ colorScheme: 'dark' }}
+                      >
+                        {TRENDING_RANGES.map(range => (
+                          <option key={range.value} value={range.value} className="bg-zinc-900 text-zinc-100 py-1">
+                            {range.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={14} className="absolute right-2.5 pointer-events-none text-emerald-400" />
+                    </div>
                   </div>
                 </div>
                 <div 
                   className="flex-1 w-full h-[250px] cursor-pointer group relative"
-                  onClick={() => navigate(`/store/${store.id}/trending?timeframe=${trendingRange}`)}
+                  onClick={() => navigate(`/store/${store.id}/trending?timeframe=${trendingRange}&metric=${trendingMetric}`)}
                   title="Click to view detailed customer breakdown"
                 >
                   <div className="absolute inset-0 bg-zinc-800/0 group-hover:bg-zinc-800/10 transition-colors duration-300 rounded-xl z-10 pointer-events-none flex items-center justify-center opacity-0 group-hover:opacity-100">
@@ -1007,8 +1044,14 @@ export default function StoreDetailPage() {
                     </span>
                   </div>
                   {(() => {
-                    const currentTopProducts = (analytics?.top_products_by_range && analytics.top_products_by_range[trendingRange])
-                      || (trendingRange === 'all' ? (analytics?.top_products || []) : [])
+                    let currentTopProducts = []
+                    if (trendingMetric === 'orders') {
+                      currentTopProducts = (analytics?.top_products_by_range_orders && analytics.top_products_by_range_orders[trendingRange])
+                        || (trendingRange === 'all' ? (analytics?.top_products_orders || []) : [])
+                    } else {
+                      currentTopProducts = (analytics?.top_products_by_range && analytics.top_products_by_range[trendingRange])
+                        || (trendingRange === 'all' ? (analytics?.top_products || []) : [])
+                    }
 
                     if (currentTopProducts && currentTopProducts.length > 0) {
                       return (
@@ -1021,9 +1064,13 @@ export default function StoreDetailPage() {
                               contentStyle={{ backgroundColor: '#09090b', borderColor: '#27272a', borderRadius: '8px' }}
                               labelStyle={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}
                               itemStyle={{ color: '#ffffff', fontSize: '11px' }}
+                              formatter={(val) => [
+                                `${val.toLocaleString()} ${trendingMetric === 'orders' ? (val === 1 ? 'order' : 'orders') : (val === 1 ? 'unit' : 'units')}`,
+                                trendingMetric === 'orders' ? 'Orders Count' : 'Units Sold'
+                              ]}
                             />
                             <Bar 
-                              dataKey="quantity" 
+                              dataKey={trendingMetric === 'orders' ? 'order_count' : 'quantity'} 
                               fill="#ffffff" 
                               activeBar={{ fill: '#d4d4d8' }}
                               radius={[4, 4, 0, 0]} 

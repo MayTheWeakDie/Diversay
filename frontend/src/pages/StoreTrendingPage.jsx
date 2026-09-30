@@ -92,11 +92,12 @@ const getRegionForCustomer = (c) => {
 const CustomTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
     const data = payload[0];
+    const unitText = data.payload.unitLabel || (data.payload.metricType === 'orders' ? (data.value === 1 ? 'order' : 'orders') : (data.value === 1 ? 'unit' : 'units'));
     return (
       <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-xl shadow-2xl relative z-[100]">
         <p className="text-white font-bold text-sm mb-1 drop-shadow-md">{data.name}</p>
         <p className="text-emerald-400 font-semibold text-xs drop-shadow-md">
-          {data.value.toLocaleString()} units ({data.payload.percentage}%)
+          {data.value.toLocaleString()} {unitText} ({data.payload.percentage}%)
         </p>
       </div>
     );
@@ -189,12 +190,14 @@ const StoreTrendingPage = () => {
   const [customerDetailsModal, setCustomerDetailsModal] = useState(null)
   
   const initialTimeframe = searchParams.get('timeframe') || 'all'
+  const initialMetric = searchParams.get('metric') || 'units'
   const [timeframe, setTimeframe] = useState(initialTimeframe)
+  const [metric, setMetric] = useState(initialMetric) // 'units' or 'orders'
 
   useEffect(() => {
-    // Sync URL when timeframe changes
-    setSearchParams({ timeframe })
-  }, [timeframe, setSearchParams])
+    // Sync URL when timeframe or metric changes
+    setSearchParams({ timeframe, metric })
+  }, [timeframe, metric, setSearchParams])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -221,6 +224,23 @@ const StoreTrendingPage = () => {
     item.customers.some(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()))
   )
 
+  const sortedData = useMemo(() => {
+    const data = [...filteredData]
+    if (metric === 'orders') {
+      return data.sort((a, b) => {
+        const ordA = a.total_orders || 0
+        const ordB = b.total_orders || 0
+        if (ordB !== ordA) return ordB - ordA
+        return b.total_quantity - a.total_quantity
+      })
+    } else {
+      return data.sort((a, b) => {
+        if (b.total_quantity !== a.total_quantity) return b.total_quantity - a.total_quantity
+        return (b.total_orders || 0) - (a.total_orders || 0)
+      })
+    }
+  }, [filteredData, metric])
+
   // Regional breakdown data calculation for selected product
   const regionBreakdown = useMemo(() => {
     if (!selectedProduct) return { list: [], map: {} }
@@ -229,22 +249,37 @@ const StoreTrendingPage = () => {
     selectedProduct.customers.forEach(c => {
       const reg = getRegionForCustomer(c)
       if (!map[reg]) {
-        map[reg] = { name: reg, quantity: 0, customers: [] }
+        map[reg] = { name: reg, quantity: 0, order_count: 0, customers: [] }
       }
       map[reg].quantity += c.quantity
+      map[reg].order_count += (c.order_count || 1)
       map[reg].customers.push(c)
     })
 
-    const list = Object.values(map).sort((a, b) => b.quantity - a.quantity)
+    const list = Object.values(map).sort((a, b) => {
+      if (metric === 'orders') return b.order_count - a.order_count
+      return b.quantity - a.quantity
+    })
     return { list, map }
-  }, [selectedProduct])
+  }, [selectedProduct, metric])
 
   // Filtered customers inside modal based on selected region filter
   const modalCustomers = useMemo(() => {
     if (!selectedProduct) return []
-    if (selectedRegion === 'all') return selectedProduct.customers
-    return selectedProduct.customers.filter(c => getRegionForCustomer(c) === selectedRegion)
-  }, [selectedProduct, selectedRegion])
+    let custs = selectedProduct.customers
+    if (selectedRegion !== 'all') {
+      custs = custs.filter(c => getRegionForCustomer(c) === selectedRegion)
+    }
+    return [...custs].sort((a, b) => {
+      if (metric === 'orders') {
+        const ordA = a.order_count || 0
+        const ordB = b.order_count || 0
+        if (ordB !== ordA) return ordB - ordA
+        return b.quantity - a.quantity
+      }
+      return b.quantity - a.quantity
+    })
+  }, [selectedProduct, selectedRegion, metric])
 
   return (
     <div className="flex-1 flex flex-col h-screen overflow-hidden bg-zinc-950 relative">
@@ -266,8 +301,36 @@ const StoreTrendingPage = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-          {/* View Mode Toggle: Pieces vs Percent */}
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end flex-wrap">
+          {/* Metric Toggle: Units Sold vs Individual Orders */}
+          <div className="flex bg-zinc-950 p-1 border border-zinc-800 rounded-xl">
+            <button
+              onClick={() => setMetric('units')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                metric === 'units'
+                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+              }`}
+              title="View analytics by units sold (quantity)"
+            >
+              <Hash size={13} />
+              <span>Units Sold</span>
+            </button>
+            <button
+              onClick={() => setMetric('orders')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                metric === 'orders'
+                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+              }`}
+              title="View analytics by individual order count"
+            >
+              <Receipt size={13} />
+              <span>Individual Orders</span>
+            </button>
+          </div>
+
+          {/* View Mode Toggle: Values vs Percent */}
           <div className="flex bg-zinc-950 p-1 border border-zinc-800 rounded-xl">
             <button
               onClick={() => setViewMode('pieces')}
@@ -276,10 +339,9 @@ const StoreTrendingPage = () => {
                   ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
                   : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
               }`}
-              title="Show values in actual pieces/units"
+              title="Show values in numbers"
             >
-              <Hash size={13} />
-              <span>Pieces</span>
+              <span>Values</span>
             </button>
             <button
               onClick={() => setViewMode('percent')}
@@ -288,7 +350,7 @@ const StoreTrendingPage = () => {
                   ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
                   : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
               }`}
-              title="Show values as percentage of total product sales"
+              title="Show values as percentage share"
             >
               <Percent size={13} />
               <span>Percent</span>
@@ -342,7 +404,7 @@ const StoreTrendingPage = () => {
           <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 text-center">
             <p className="text-red-400 text-sm font-medium">{error}</p>
           </div>
-        ) : filteredData.length === 0 ? (
+        ) : sortedData.length === 0 ? (
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-12 text-center flex flex-col items-center">
             <Package size={48} className="text-zinc-700 mb-4" />
             <h3 className="text-white font-bold text-lg mb-2">No Products Found</h3>
@@ -350,9 +412,25 @@ const StoreTrendingPage = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredData.map((item, idx) => {
-              const maxQty = Math.max(...item.customers.map(c => c.quantity))
-              
+            {sortedData.map((item, idx) => {
+              const customersSorted = [...item.customers].sort((a, b) => {
+                if (metric === 'orders') {
+                  const ordA = a.order_count || 0
+                  const ordB = b.order_count || 0
+                  if (ordB !== ordA) return ordB - ordA
+                  return b.quantity - a.quantity
+                }
+                return b.quantity - a.quantity
+              })
+
+              const maxVal = metric === 'orders'
+                ? Math.max(...customersSorted.map(c => c.order_count || 0), 1)
+                : Math.max(...customersSorted.map(c => c.quantity), 1)
+
+              const totalVal = metric === 'orders'
+                ? (item.total_orders || customersSorted.reduce((acc, c) => acc + (c.order_count || 0), 0) || 1)
+                : (item.total_quantity || 1)
+
               return (
                 <div 
                   key={idx} 
@@ -380,7 +458,10 @@ const StoreTrendingPage = () => {
                           {item.product_name}
                         </h3>
                         <p className="text-xs font-medium text-emerald-400 mt-0.5">
-                          Total: {item.total_quantity.toLocaleString()} units
+                          {metric === 'orders' 
+                            ? `Total: ${(item.total_orders || 0).toLocaleString()} ${item.total_orders === 1 ? 'order' : 'orders'}`
+                            : `Total: ${item.total_quantity.toLocaleString()} units`
+                          }
                         </p>
                       </div>
                     </div>
@@ -403,9 +484,10 @@ const StoreTrendingPage = () => {
                         scrollbarColor: '#3f3f46 transparent' 
                       }}
                     >
-                      {item.customers.map((c, cIdx) => {
-                        const relativePct = maxQty > 0 ? (c.quantity / maxQty) * 100 : 0
-                        const sharePct = item.total_quantity > 0 ? (c.quantity / item.total_quantity) * 100 : 0
+                      {customersSorted.map((c, cIdx) => {
+                        const val = metric === 'orders' ? (c.order_count || 0) : c.quantity
+                        const relativePct = maxVal > 0 ? (val / maxVal) * 100 : 0
+                        const sharePct = totalVal > 0 ? (val / totalVal) * 100 : 0
                         const isTopBuyer = cIdx === 0
                         
                         let barGradient = isTopBuyer ? 'from-emerald-400 via-teal-400 to-emerald-500' : 'from-emerald-500/80 to-teal-500/80'
@@ -429,7 +511,9 @@ const StoreTrendingPage = () => {
                               <span className={`font-bold ${textClass}`}>
                                 {viewMode === 'percent' 
                                   ? `${sharePct.toFixed(1)}%` 
-                                  : `${c.quantity.toLocaleString()} pcs`
+                                  : (metric === 'orders'
+                                      ? `${val.toLocaleString()} ${val === 1 ? 'order' : 'orders'}`
+                                      : `${val.toLocaleString()} pcs`)
                                 }
                               </span>
                             </div>
@@ -454,314 +538,346 @@ const StoreTrendingPage = () => {
       </div>
 
       {/* Product Detailed Breakdown Modal */}
-      {selectedProduct && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-            {/* Modal Header */}
-            <div className="px-6 py-5 bg-zinc-950 border-b border-zinc-800 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                  <BarChart3 size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-white line-clamp-1">{selectedProduct.product_name}</h2>
-                  <div className="flex items-center gap-3 text-xs mt-0.5">
-                    <span className="text-emerald-400 font-semibold">
-                      Total Volume: {selectedProduct.total_quantity.toLocaleString()} units
-                    </span>
-                    {selectedProduct.total_revenue > 0 && (
-                      <span className="text-emerald-400 font-bold">
-                        • Total Value: ₦{selectedProduct.total_revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+      {selectedProduct && (() => {
+        const pieTotal = metric === 'orders' ? (selectedProduct.total_orders || 1) : selectedProduct.total_quantity
+        const topCustVal = modalCustomers[0] ? (metric === 'orders' ? (modalCustomers[0].order_count || 0) : modalCustomers[0].quantity) : 0
+        const topCustPct = pieTotal > 0 ? ((topCustVal / pieTotal) * 100).toFixed(1) : '0'
+
+        const regTotal = metric === 'orders' ? (selectedProduct.total_orders || 1) : selectedProduct.total_quantity
+        const topRegVal = regionBreakdown.list[0] ? (metric === 'orders' ? regionBreakdown.list[0].order_count : regionBreakdown.list[0].quantity) : 0
+        const topRegPct = regTotal > 0 ? ((topRegVal / regTotal) * 100).toFixed(1) : '0'
+
+        return (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+              {/* Modal Header */}
+              <div className="px-6 py-5 bg-zinc-950 border-b border-zinc-800 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                    <BarChart3 size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-white line-clamp-1">{selectedProduct.product_name}</h2>
+                    <div className="flex items-center gap-3 text-xs mt-0.5 flex-wrap">
+                      <span className="text-emerald-400 font-semibold">
+                        Total Volume: {selectedProduct.total_quantity.toLocaleString()} units
                       </span>
-                    )}
+                      <span className="text-sky-400 font-semibold">
+                        • Total Orders: {(selectedProduct.total_orders || 0).toLocaleString()} orders
+                      </span>
+                      {selectedProduct.total_revenue > 0 && (
+                        <span className="text-emerald-400 font-bold">
+                          • Total Value: ₦{selectedProduct.total_revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
+                <button 
+                  onClick={() => setSelectedProduct(null)}
+                  className="p-2 bg-zinc-800 text-zinc-400 hover:text-white rounded-xl transition-colors"
+                >
+                  <X size={18} />
+                </button>
               </div>
-              <button 
-                onClick={() => setSelectedProduct(null)}
-                className="p-2 bg-zinc-800 text-zinc-400 hover:text-white rounded-xl transition-colors"
+
+              {/* Modal Tabs */}
+              <div className="px-6 py-3 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between shrink-0 gap-4 flex-wrap">
+                <div className="flex bg-zinc-950 p-1 border border-zinc-800 rounded-xl">
+                  <button
+                    onClick={() => { setModalTab('customers'); setSelectedRegion('all') }}
+                    className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
+                      modalTab === 'customers'
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
+                        : 'text-zinc-400 hover:text-white border border-transparent'
+                    }`}
+                  >
+                    <PieIcon size={14} />
+                    <span>Customer Pie Breakdown</span>
+                  </button>
+                  <button
+                    onClick={() => setModalTab('regions')}
+                    className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
+                      modalTab === 'regions'
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
+                        : 'text-zinc-400 hover:text-white border border-transparent'
+                    }`}
+                  >
+                    <Globe size={14} />
+                    <span>Regional Breakdown (Geopolitical)</span>
+                  </button>
+                </div>
+
+                <span className="text-xs text-zinc-500 font-medium">
+                  {selectedProduct.customers.length} total customer entries
+                </span>
+              </div>
+
+              {/* Modal Body */}
+              <div 
+                className="flex-1 overflow-y-auto p-6 space-y-6"
+                style={{ colorScheme: 'dark', scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}
               >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Modal Tabs */}
-            <div className="px-6 py-3 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between shrink-0 gap-4 flex-wrap">
-              <div className="flex bg-zinc-950 p-1 border border-zinc-800 rounded-xl">
-                <button
-                  onClick={() => { setModalTab('customers'); setSelectedRegion('all') }}
-                  className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
-                    modalTab === 'customers'
-                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
-                      : 'text-zinc-400 hover:text-white border border-transparent'
-                  }`}
-                >
-                  <PieIcon size={14} />
-                  <span>Customer Pie Breakdown</span>
-                </button>
-                <button
-                  onClick={() => setModalTab('regions')}
-                  className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
-                    modalTab === 'regions'
-                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shadow-sm'
-                      : 'text-zinc-400 hover:text-white border border-transparent'
-                  }`}
-                >
-                  <Globe size={14} />
-                  <span>Regional Breakdown (Geopolitical)</span>
-                </button>
-              </div>
-
-              <span className="text-xs text-zinc-500 font-medium">
-                {selectedProduct.customers.length} total customer entries
-              </span>
-            </div>
-
-            {/* Modal Body */}
-            <div 
-              className="flex-1 overflow-y-auto p-6 space-y-6"
-              style={{ colorScheme: 'dark', scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}
-            >
-              {modalTab === 'customers' ? (
-                /* Tab 1: Customer Share Pie Chart & Table */
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
-                  {/* Pie Chart */}
-                  <RollingPieChart 
-                    data={selectedProduct.customers.map(c => ({
-                      name: c.name,
-                      value: c.quantity,
-                      percentage: ((c.quantity / selectedProduct.total_quantity) * 100).toFixed(1)
-                    }))}
-                    centerText={`${((selectedProduct.customers[0]?.quantity / selectedProduct.total_quantity) * 100).toFixed(1)}%`}
-                    centerSubtext="TOP BUYER SHARE"
-                    isRegion={false}
-                  />
-
-                  {/* Customer List */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">Customer Share Breakdown</h3>
-                      <span className="text-[10px] text-zinc-500 italic">Click customer for order history</span>
-                    </div>
-
-                    <div 
-                      className="max-h-[260px] overflow-y-auto space-y-2 pr-2"
-                      style={{ colorScheme: 'dark', scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}
-                    >
-                      {selectedProduct.customers.map((c, idx) => {
-                        const pct = ((c.quantity / selectedProduct.total_quantity) * 100).toFixed(1)
-                        const color = PIE_COLORS[idx % PIE_COLORS.length]
-                        const isTopBuyer = idx === 0
-                        
-                        return (
-                          <div 
-                            key={idx} 
-                            onClick={() => setCustomerDetailsModal(c)}
-                            className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                              isTopBuyer
-                                ? 'bg-emerald-500/10 border-emerald-500/40 shadow-md shadow-emerald-500/5 hover:border-emerald-400'
-                                : 'bg-zinc-950 border-zinc-800/80 hover:border-emerald-500/40'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3 truncate max-w-[65%]">
-                              <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                              <div className="truncate">
-                                <div className="flex items-center gap-1.5">
-                                  <p className="text-xs font-bold text-white truncate" title={c.name}>{c.name}</p>
-                                  {isTopBuyer && (
-                                    <span className="flex items-center gap-1 bg-emerald-500/20 border border-emerald-500/30 px-1.5 py-0.5 rounded text-[9px] font-black text-emerald-400 uppercase tracking-widest shrink-0">
-                                      <Crown size={10} className="fill-emerald-400 text-emerald-400" /> TOP BUYER
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-[10px] text-zinc-400 font-medium">
-                                  {c.state || 'Unspecified State'} {c.city ? `• ${c.city}` : ''}
-                                  {c.total_spent > 0 && <span className="text-emerald-400 font-semibold ml-1.5">• ₦{c.total_spent.toLocaleString()}</span>}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <p className="text-xs font-black text-emerald-400">
-                                {c.quantity.toLocaleString()} pcs
-                              </p>
-                              <p className="text-[10px] text-zinc-400 font-semibold">{pct}% share</p>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                /* Tab 2: Regional & Geopolitical Zone Breakdown */
-                <div className="space-y-6">
-                  {/* Region Summary Pie Chart & Cards */}
+                {modalTab === 'customers' ? (
+                  /* Tab 1: Customer Share Pie Chart & Table */
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
-                    {/* Region Pie Chart */}
+                    {/* Pie Chart */}
                     <RollingPieChart 
-                      data={regionBreakdown.list.map(r => ({
-                        name: r.name,
-                        value: r.quantity,
-                        percentage: ((r.quantity / selectedProduct.total_quantity) * 100).toFixed(1)
-                      }))}
-                      centerText={regionBreakdown.list[0] ? `${((regionBreakdown.list[0].quantity / selectedProduct.total_quantity) * 100).toFixed(1)}%` : '100%'}
-                      centerSubtext={regionBreakdown.list[0]?.name || 'TOP REGION'}
-                      colorsMap={REGION_COLOR_MAP}
-                      isRegion={true}
+                      data={modalCustomers.map(c => {
+                        const val = metric === 'orders' ? (c.order_count || 0) : c.quantity
+                        return {
+                          name: c.name,
+                          value: val,
+                          unitLabel: metric === 'orders' ? (val === 1 ? 'order' : 'orders') : (val === 1 ? 'unit' : 'units'),
+                          percentage: pieTotal > 0 ? ((val / pieTotal) * 100).toFixed(1) : '0'
+                        }
+                      })}
+                      centerText={`${topCustPct}%`}
+                      centerSubtext="TOP BUYER SHARE"
+                      isRegion={false}
                     />
 
-                    {/* Region Cards Grid */}
+                    {/* Customer List */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">Select Region to Filter Customers</h3>
-                        {selectedRegion !== 'all' && (
-                          <button
-                            onClick={() => setSelectedRegion('all')}
-                            className="text-xs text-emerald-400 font-semibold hover:underline"
-                          >
-                            Show All Regions
-                          </button>
-                        )}
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">Customer Share Breakdown</h3>
+                        <span className="text-[10px] text-zinc-500 italic">Click customer for order history</span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2.5">
-                        <div
-                          onClick={() => setSelectedRegion('all')}
-                          className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                            selectedRegion === 'all'
-                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 shadow-sm'
-                              : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-white'
-                          }`}
-                        >
-                          <p className="text-xs font-bold">All Regions</p>
-                          <p className="text-[10px] opacity-80 mt-0.5">{selectedProduct.customers.length} Customers</p>
-                        </div>
-
-                        {regionBreakdown.list.map((r) => {
-                          const pct = ((r.quantity / selectedProduct.total_quantity) * 100).toFixed(1)
-                          const color = REGION_COLOR_MAP[r.name] || '#9ca3af'
-                          const isSelected = selectedRegion === r.name
-                          const topBuyerInRegion = r.customers && r.customers[0]
-
+                      <div 
+                        className="max-h-[260px] overflow-y-auto space-y-2 pr-2"
+                        style={{ colorScheme: 'dark', scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}
+                      >
+                        {modalCustomers.map((c, idx) => {
+                          const val = metric === 'orders' ? (c.order_count || 0) : c.quantity
+                          const pct = pieTotal > 0 ? ((val / pieTotal) * 100).toFixed(1) : '0'
+                          const color = PIE_COLORS[idx % PIE_COLORS.length]
+                          const isTopBuyer = idx === 0
+                          
                           return (
-                            <div
-                              key={r.name}
-                              onClick={() => setSelectedRegion(r.name)}
-                              className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                                isSelected
-                                  ? 'bg-zinc-800 border-emerald-500/50 shadow-md scale-[1.02]'
-                                  : 'bg-zinc-950 border-zinc-800 hover:border-zinc-700'
+                            <div 
+                              key={idx} 
+                              onClick={() => setCustomerDetailsModal(c)}
+                              className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                                isTopBuyer
+                                  ? 'bg-emerald-500/10 border-emerald-500/40 shadow-md shadow-emerald-500/5 hover:border-emerald-400'
+                                  : 'bg-zinc-950 border-zinc-800/80 hover:border-emerald-500/40'
                               }`}
                             >
-                              <div className="flex items-center justify-between gap-1">
-                                <div className="flex items-center gap-2 truncate">
-                                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                                  <p className="text-xs font-bold text-white truncate">{r.name}</p>
+                              <div className="flex items-center gap-3 truncate max-w-[65%]">
+                                <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                                <div className="truncate">
+                                  <div className="flex items-center gap-1.5">
+                                    <p className="text-xs font-bold text-white truncate" title={c.name}>{c.name}</p>
+                                    {isTopBuyer && (
+                                      <span className="flex items-center gap-1 bg-emerald-500/20 border border-emerald-500/30 px-1.5 py-0.5 rounded text-[9px] font-black text-emerald-400 uppercase tracking-widest shrink-0">
+                                        <Crown size={10} className="fill-emerald-400 text-emerald-400" /> TOP BUYER
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-zinc-400 font-medium">
+                                    {c.state || 'Unspecified State'} {c.city ? `• ${c.city}` : ''}
+                                    {c.total_spent > 0 && <span className="text-emerald-400 font-semibold ml-1.5">• ₦{c.total_spent.toLocaleString()}</span>}
+                                  </p>
                                 </div>
-                                <span className="text-[10px] font-extrabold text-emerald-400">{pct}%</span>
                               </div>
-                              <p className="text-[10px] text-zinc-400 mt-1 font-medium">
-                                {r.quantity.toLocaleString()} units ({r.customers.length} buyers)
-                              </p>
-                              {topBuyerInRegion && (
-                                <p className="text-[9px] text-emerald-400 font-semibold truncate mt-1 flex items-center gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                                  <Crown size={9} className="fill-emerald-400 shrink-0" />
-                                  <span className="truncate">Top: {topBuyerInRegion.name}</span>
+                              <div className="text-right shrink-0">
+                                <p className="text-xs font-black text-emerald-400">
+                                  {metric === 'orders'
+                                    ? `${val.toLocaleString()} ${val === 1 ? 'order' : 'orders'}`
+                                    : `${val.toLocaleString()} pcs`
+                                  }
                                 </p>
-                              )}
+                                <p className="text-[10px] text-zinc-400 font-semibold">{pct}% share</p>
+                              </div>
                             </div>
                           )
                         })}
                       </div>
                     </div>
                   </div>
+                ) : (
+                  /* Tab 2: Regional & Geopolitical Zone Breakdown */
+                  <div className="space-y-6">
+                    {/* Region Summary Pie Chart & Cards */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
+                      {/* Region Pie Chart */}
+                      <RollingPieChart 
+                        data={regionBreakdown.list.map(r => {
+                          const val = metric === 'orders' ? r.order_count : r.quantity
+                          return {
+                            name: r.name,
+                            value: val,
+                            unitLabel: metric === 'orders' ? (val === 1 ? 'order' : 'orders') : (val === 1 ? 'unit' : 'units'),
+                            percentage: regTotal > 0 ? ((val / regTotal) * 100).toFixed(1) : '0'
+                          }
+                        })}
+                        centerText={`${topRegPct}%`}
+                        centerSubtext={regionBreakdown.list[0]?.name || 'TOP REGION'}
+                        colorsMap={REGION_COLOR_MAP}
+                        isRegion={true}
+                      />
 
-                  {/* Customers in Selected Region Drill-Down Table */}
-                  <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-5 space-y-4">
-                    <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-                      <div className="flex items-center gap-2">
-                        <Globe size={16} className="text-emerald-400" />
-                        <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                          {selectedRegion === 'all' ? 'All Customers Nationwide' : `Customers in ${selectedRegion} Region`}
-                        </h3>
-                      </div>
-                      <span className="text-xs text-zinc-400 font-medium">
-                        {modalCustomers.length} buyers
-                      </span>
-                    </div>
+                      {/* Region Cards Grid */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">Select Region to Filter Customers</h3>
+                          {selectedRegion !== 'all' && (
+                            <button
+                              onClick={() => setSelectedRegion('all')}
+                              className="text-xs text-emerald-400 font-semibold hover:underline"
+                            >
+                              Show All Regions
+                            </button>
+                          )}
+                        </div>
 
-                    <div 
-                      className="max-h-[220px] overflow-y-auto space-y-2.5 pr-2"
-                      style={{ colorScheme: 'dark', scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}
-                    >
-                      {modalCustomers.map((c, cIdx) => {
-                        const productPct = ((c.quantity / selectedProduct.total_quantity) * 100).toFixed(1)
-                        const regTotal = selectedRegion === 'all' ? selectedProduct.total_quantity : (regionBreakdown.map[selectedRegion]?.quantity || 1)
-                        const regionSharePct = ((c.quantity / regTotal) * 100).toFixed(1)
-                        const isTopBuyer = cIdx === 0
-
-                        return (
-                          <div 
-                            key={cIdx} 
-                            onClick={() => setCustomerDetailsModal(c)}
-                            className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                              isTopBuyer
-                                ? 'bg-emerald-500/10 border-emerald-500/40 shadow-md hover:border-emerald-400'
-                                : 'bg-zinc-900 border-zinc-800/80 hover:border-emerald-500/40'
+                        <div className="grid grid-cols-2 gap-2.5">
+                          <div
+                            onClick={() => setSelectedRegion('all')}
+                            className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                              selectedRegion === 'all'
+                                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 shadow-sm'
+                                : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-white'
                             }`}
                           >
-                            <div className="flex items-center gap-3">
-                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
-                                isTopBuyer ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-zinc-800 text-zinc-400'
-                              }`}>
-                                {isTopBuyer ? <Crown size={14} className="fill-emerald-400 text-emerald-400" /> : `#${cIdx + 1}`}
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <p className="text-xs font-bold text-white">{c.name}</p>
-                                  {isTopBuyer && (
-                                    <span className="flex items-center gap-1 bg-emerald-500/20 border border-emerald-500/30 px-1.5 py-0.5 rounded text-[9px] font-black text-emerald-400 uppercase tracking-wider">
-                                      <Crown size={9} className="fill-emerald-400 text-emerald-400" />
-                                      {selectedRegion === 'all' ? 'TOP BUYER' : `TOP BUYER IN ${selectedRegion.toUpperCase()}`}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-0.5">
-                                  <span className="flex items-center gap-1">
-                                    <MapPin size={10} className="text-emerald-400" />
-                                    {c.state || 'Unspecified State'} {c.city ? `(${c.city})` : ''}
-                                  </span>
-                                  <span>•</span>
-                                  <span className="text-zinc-400">{getRegionForCustomer(c)}</span>
-                                  {c.total_spent > 0 && (
-                                    <>
-                                      <span>•</span>
-                                      <span className="text-emerald-400 font-bold">₦{c.total_spent.toLocaleString()}</span>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="text-right">
-                              <p className="text-xs font-black text-emerald-400">
-                                {c.quantity.toLocaleString()} pcs
-                              </p>
-                              <p className="text-[10px] text-zinc-400 font-semibold">
-                                {productPct}% of product {selectedRegion !== 'all' && `(${regionSharePct}% of ${selectedRegion})`}
-                              </p>
-                            </div>
+                            <p className="text-xs font-bold">All Regions</p>
+                            <p className="text-[10px] opacity-80 mt-0.5">{selectedProduct.customers.length} Customers</p>
                           </div>
-                        )
-                      })}
+
+                          {regionBreakdown.list.map((r) => {
+                            const rVal = metric === 'orders' ? r.order_count : r.quantity
+                            const pct = regTotal > 0 ? ((rVal / regTotal) * 100).toFixed(1) : '0'
+                            const color = REGION_COLOR_MAP[r.name] || '#9ca3af'
+                            const isSelected = selectedRegion === r.name
+                            const topBuyerInRegion = r.customers && r.customers[0]
+
+                            return (
+                              <div
+                                key={r.name}
+                                onClick={() => setSelectedRegion(r.name)}
+                                className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                                  isSelected
+                                    ? 'bg-zinc-800 border-emerald-500/50 shadow-md scale-[1.02]'
+                                    : 'bg-zinc-950 border-zinc-800 hover:border-zinc-700'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-1">
+                                  <div className="flex items-center gap-2 truncate">
+                                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                                    <p className="text-xs font-bold text-white truncate">{r.name}</p>
+                                  </div>
+                                  <span className="text-[10px] font-extrabold text-emerald-400">{pct}%</span>
+                                </div>
+                                <p className="text-[10px] text-zinc-400 mt-1 font-medium">
+                                  {rVal.toLocaleString()} {metric === 'orders' ? (rVal === 1 ? 'order' : 'orders') : 'units'} ({r.customers.length} buyers)
+                                </p>
+                                {topBuyerInRegion && (
+                                  <p className="text-[9px] text-emerald-400 font-semibold truncate mt-1 flex items-center gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                    <Crown size={9} className="fill-emerald-400 shrink-0" />
+                                    <span className="truncate">Top: {topBuyerInRegion.name}</span>
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Customers in Selected Region Drill-Down Table */}
+                    <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                      <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                        <div className="flex items-center gap-2">
+                          <Globe size={16} className="text-emerald-400" />
+                          <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                            {selectedRegion === 'all' ? 'All Customers Nationwide' : `Customers in ${selectedRegion} Region`}
+                          </h3>
+                        </div>
+                        <span className="text-xs text-zinc-400 font-medium">
+                          {modalCustomers.length} buyers
+                        </span>
+                      </div>
+
+                      <div 
+                        className="max-h-[220px] overflow-y-auto space-y-2.5 pr-2"
+                        style={{ colorScheme: 'dark', scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}
+                      >
+                        {modalCustomers.map((c, cIdx) => {
+                          const cVal = metric === 'orders' ? (c.order_count || 0) : c.quantity
+                          const productPct = pieTotal > 0 ? ((cVal / pieTotal) * 100).toFixed(1) : '0'
+                          const rTotal = selectedRegion === 'all'
+                            ? pieTotal
+                            : (metric === 'orders' ? (regionBreakdown.map[selectedRegion]?.order_count || 1) : (regionBreakdown.map[selectedRegion]?.quantity || 1))
+                          const regionSharePct = rTotal > 0 ? ((cVal / rTotal) * 100).toFixed(1) : '0'
+                          const isTopBuyer = cIdx === 0
+
+                          return (
+                            <div 
+                              key={cIdx} 
+                              onClick={() => setCustomerDetailsModal(c)}
+                              className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                                isTopBuyer
+                                  ? 'bg-emerald-500/10 border-emerald-500/40 shadow-md hover:border-emerald-400'
+                                  : 'bg-zinc-900 border-zinc-800/80 hover:border-emerald-500/40'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                                  isTopBuyer ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-zinc-800 text-zinc-400'
+                                }`}>
+                                  {isTopBuyer ? <Crown size={14} className="fill-emerald-400 text-emerald-400" /> : `#${cIdx + 1}`}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-xs font-bold text-white">{c.name}</p>
+                                    {isTopBuyer && (
+                                      <span className="flex items-center gap-1 bg-emerald-500/20 border border-emerald-500/30 px-1.5 py-0.5 rounded text-[9px] font-black text-emerald-400 uppercase tracking-wider">
+                                        <Crown size={9} className="fill-emerald-400 text-emerald-400" />
+                                        {selectedRegion === 'all' ? 'TOP BUYER' : `TOP BUYER IN ${selectedRegion.toUpperCase()}`}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-0.5">
+                                    <span className="flex items-center gap-1">
+                                      <MapPin size={10} className="text-emerald-400" />
+                                      {c.state || 'Unspecified State'} {c.city ? `(${c.city})` : ''}
+                                    </span>
+                                    <span>•</span>
+                                    <span className="text-zinc-400">{getRegionForCustomer(c)}</span>
+                                    {c.total_spent > 0 && (
+                                      <>
+                                        <span>•</span>
+                                        <span className="text-emerald-400 font-bold">₦{c.total_spent.toLocaleString()}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="text-right">
+                                <p className="text-xs font-black text-emerald-400">
+                                  {metric === 'orders'
+                                    ? `${cVal.toLocaleString()} ${cVal === 1 ? 'order' : 'orders'}`
+                                    : `${cVal.toLocaleString()} pcs`
+                                  }
+                                </p>
+                                <p className="text-[10px] text-zinc-400 font-semibold">
+                                  {productPct}% of product {selectedRegion !== 'all' && `(${regionSharePct}% of ${selectedRegion})`}
+                                </p>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Customer Cumulative Expense & Order History Modal */}
       {customerDetailsModal && (

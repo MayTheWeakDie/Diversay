@@ -448,16 +448,28 @@ def get_store_analytics(
         "90": {},
         "all": {}
     }
+    trending_orders_by_range = {
+        "1": {},
+        "7": {},
+        "30": {},
+        "90": {},
+        "all": {}
+    }
     
     for order in all_orders_list:
+        order_time = order.dispatch_time or order.created_at
+        delta_days = (now - order_time).total_seconds() / 86400.0 if order_time else None
+        
+        seen_products = set()
         for item in order.line_items:
             product_name = item.product.name if item.product else f"Product #{item.product_id}"
-            order_time = order.dispatch_time or order.created_at
             
             trending_by_range["all"][product_name] = trending_by_range["all"].get(product_name, 0) + item.quantity
+            if product_name not in seen_products:
+                seen_products.add(product_name)
+                trending_orders_by_range["all"][product_name] = trending_orders_by_range["all"].get(product_name, 0) + 1
             
-            if order_time:
-                delta_days = (now - order_time).total_seconds() / 86400.0
+            if delta_days is not None:
                 if delta_days <= 1.0:
                     trending_by_range["1"][product_name] = trending_by_range["1"].get(product_name, 0) + item.quantity
                 if delta_days <= 7.0:
@@ -466,18 +478,39 @@ def get_store_analytics(
                     trending_by_range["30"][product_name] = trending_by_range["30"].get(product_name, 0) + item.quantity
                 if delta_days <= 90.0:
                     trending_by_range["90"][product_name] = trending_by_range["90"].get(product_name, 0) + item.quantity
-            
-    def format_top_5(trend_dict):
+
+        if delta_days is not None:
+            for p_name in seen_products:
+                if delta_days <= 1.0:
+                    trending_orders_by_range["1"][p_name] = trending_orders_by_range["1"].get(p_name, 0) + 1
+                if delta_days <= 7.0:
+                    trending_orders_by_range["7"][p_name] = trending_orders_by_range["7"].get(p_name, 0) + 1
+                if delta_days <= 30.0:
+                    trending_orders_by_range["30"][p_name] = trending_orders_by_range["30"].get(p_name, 0) + 1
+                if delta_days <= 90.0:
+                    trending_orders_by_range["90"][p_name] = trending_orders_by_range["90"].get(p_name, 0) + 1
+
+    def format_top_5_units(td, od):
         return [
-            {"name": name, "quantity": qty}
-            for name, qty in sorted(trend_dict.items(), key=lambda x: x[1], reverse=True)[:5]
+            {"name": name, "quantity": qty, "order_count": od.get(name, 0)}
+            for name, qty in sorted(td.items(), key=lambda x: x[1], reverse=True)[:5]
+        ]
+
+    def format_top_5_orders(td, od):
+        return [
+            {"name": name, "quantity": td.get(name, 0), "order_count": ord_cnt}
+            for name, ord_cnt in sorted(od.items(), key=lambda x: x[1], reverse=True)[:5]
         ]
         
     top_products_by_range = {
-        r: format_top_5(td) for r, td in trending_by_range.items()
+        r: format_top_5_units(trending_by_range[r], trending_orders_by_range[r]) for r in trending_by_range
+    }
+    top_products_by_range_orders = {
+        r: format_top_5_orders(trending_by_range[r], trending_orders_by_range[r]) for r in trending_orders_by_range
     }
     
     selected_top = top_products_by_range.get(str(trending_days), top_products_by_range["all"])
+    selected_top_orders = top_products_by_range_orders.get(str(trending_days), top_products_by_range_orders["all"])
     
     inv_items = db.query(StoreInventory).filter(
         StoreInventory.store_id == store_id
@@ -561,7 +594,9 @@ def get_store_analytics(
         "total_incoming": total_incoming,
         "total_outgoing": total_outgoing,
         "top_products": selected_top,
+        "top_products_orders": selected_top_orders,
         "top_products_by_range": top_products_by_range,
+        "top_products_by_range_orders": top_products_by_range_orders,
         "dsl_count": dsl_count,
         "dslp_count": dslp_count,
         "dsl_stock": dsl_stock,
@@ -648,10 +683,13 @@ def get_store_trending_details(
                 product_map[product_name] = {
                     "product_name": product_name,
                     "total_quantity": 0,
+                    "order_ids": set(),
                     "customers": {}
                 }
                 
             product_map[product_name]["total_quantity"] += item.quantity
+            product_map[product_name]["order_ids"].add(order.id)
+
             p_cust = product_map[product_name]["customers"]
             if customer_name not in p_cust:
                 p_cust[customer_name] = {
@@ -703,6 +741,7 @@ def get_store_trending_details(
         results.append({
             "product_name": p_name,
             "total_quantity": p_data["total_quantity"],
+            "total_orders": len(p_data["order_ids"]),
             "total_revenue": round(sum(c["total_spent"] for c in customer_list), 2),
             "customers": customer_list
         })
